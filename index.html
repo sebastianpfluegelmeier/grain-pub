@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- `user-scalable=no, maximum-scale=1` disables pinch-to-zoom AND the
+         iOS double-tap zoom so taps on UI controls don't accidentally
+         change page zoom. `interactive-widget=resizes-content` keeps the
+         on-screen keyboard from collapsing the canvas under the layout. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>grain</title>
+    <!-- PWA / "Add to Home Screen" tags. On iOS Safari, real fullscreen
+         (no URL bar / no tab bar) is only available when the page is
+         launched from a home-screen icon as a web app. The manifest
+         covers Android Chrome; the apple-mobile-web-app-* tags cover
+         iOS-specific launch behaviour. `black-translucent` makes the
+         status bar overlay the canvas instead of consuming a strip. -->
+    <link rel="manifest" href="/grain-pub/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="grain" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <style>
+      html, body {
+        margin: 0; padding: 0; height: 100%;
+        background: #0a0a0a; color: #ddd;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        /* iOS Safari ignores `user-scalable=no` for double-tap-zoom in
+           recent versions; this CSS hint is the modern way to disable
+           the gesture. `manipulation` keeps tap + scroll + pinch-out
+           working but disables double-tap zoom. */
+        touch-action: manipulation;
+        /* Belt-and-suspenders: also disable the long-press callout/menu
+           on UI controls since this is meant to feel like a native app. */
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        overscroll-behavior: none;
+      }
+      canvas#grain-canvas {
+        position: fixed; inset: 0; width: 100%; height: 100%;
+        z-index: 0; background: #000;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+      #app { position: relative; z-index: 1; }
+
+      /* The blanket `user-select: none` on body would also block selection
+         in the code editor and any text inputs, which is the wrong UX —
+         re-enable for those specifically. */
+      .cm-editor, .cm-content, input, textarea, [contenteditable], pre {
+        -webkit-user-select: text;
+        user-select: text;
+      }
+
+      /* Presentation / fullscreen mode: hide every overlay and the panel
+         bar so only the canvas is visible. The Svelte side toggles
+         body.fs-mode and renders a small ⤓ exit button (separately
+         positioned, opt-in to staying visible). */
+      body.fs-mode .panel-bar,
+      body.fs-mode .overlay { display: none !important; }
+    </style>
+    <script type="module" crossorigin src="/grain-pub/assets/index-pHdA8a3D.js"></script>
+    <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-DPfsUCuL.css">
+  </head>
+  <body>
+    <canvas id="grain-canvas"></canvas>
+    <div id="app"></div>
+  </body>
+</html>
