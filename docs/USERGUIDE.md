@@ -28,7 +28,11 @@ cargo run -- [OPTIONS]
 | `--dump-wgsl` | — | Print generated WGSL shaders to stderr. |
 | `--midi-debug` | — | Print all incoming MIDI messages (live mode). |
 | `--midi-out <NAME>` | — | Route `note` / `cc` output to the first MIDI port whose name contains this substring (case-insensitive). See §6.14. |
-| `--ui` | — | Open the live web UI in a chromeless window (live mode). |
+| `--ui` | — | Open the live web UI in a chromeless window (live mode). The UI is also reachable from any browser at `http://127.0.0.1:<port>/`. |
+| `--port <N>` | 3000 | HTTP/WebSocket port for the live-mode UI server. Use a different port to run multiple `--live` sessions side by side. |
+| `--selectors <CSV>` | — | Pre-set selector branches at compile time, e.g. `--selectors "shape=2,noise=4"`. Applies to ALL selectors with the given mangled-name prefix (so `shape=2` sets every `selector("shape", …)` to its 3rd branch). Useful for offline rendering and to seed the live-mode shader cache. |
+| `--list-selectors` | — | Parse + lower the program, print every selector found on the surface (mangled name, label, options, default selection), then exit. Combine with `--selectors` to scout valid IDs. |
+| `--metronome` | — | Start the metronome audio click on by default in live mode. Without this flag the click is off until you toggle it from the UI. |
 | `--ilda` | — | Enable ILDA laser output via Ether Dream DAC (live mode). |
 | `--helios <DEVICE>` | — | Enable ILDA laser output via Helios DAC (device index, build with `helios` feature). |
 | `--helios-pps <PPS>` | 30000 | Points per second for Helios DAC output. |
@@ -278,6 +282,26 @@ Paths are relative to the current file (when using `-f`) or the current working 
 
 Use `expr >> fout(N)` as a top-level line. You can have a main expression and/or feedback lines. If there is no main, output is `fout(0)`. Supported for PNG (single frame: no previous frame), MP4, and live preview (`--live`).
 
+**Idiomatic feedback wrapper.** Most non-trivial programs wrap the loop in
+a function so the inner pipeline is visible and the slot is local:
+
+```text
+fn fb(in, n) =
+  fin(0)
+  >> _ + in              // mix in the new frame's signal
+  >> _ + n               // add noise / modulation
+  >> dist(_)             // distortion stage
+  >> fb_clip(_)          // wrap or saturate so the buffer doesn't blow up
+  >> fout(0)
+
+// Call it like any other block in main:
+input + shape >> fb(_, noise) >> renderer(_)
+```
+
+`fb_clip` is typically a `selector` that switches between wrapping
+strategies (`mod 1`, `tanh`, `clip`, `clamp`, identity) — feedback chains
+diverge fast without one. See §5.3 for the selector DSL.
+
 ---
 
 ## 5. Built-in signals
@@ -337,7 +361,9 @@ When running with `--live`, a web UI (and optional Push controller) shows all su
 - **Value sequencers (`vseq`)** — grid of vertical fill bars (4-wide). Drag each step to set its value 0–1. Current step is highlighted during playback.
 - **Pressure (`pressure`)** — read-only fill bar showing live aftertouch value from a MIDI controller.
 - **Audio envelope (`audio_env`)** — read-only level meter showing the band-passed envelope of the live audio input. The label defaults to the bandpass corners (e.g. `40-120Hz`) so multiple `audio_env` elements stay distinguishable at a glance.
-- **Selector (`selector`)** — picks one of N labeled "branch" expressions. Only the selected branch reaches the GPU shader; the unselected branches are dropped at compile time, so each option can be as expensive as you want. Switching triggers a hot recompile. See [§5.3](#53-selectors-pathswitching) for the DSL and UI.
+- **Mod source (`mod_out`)** — read-only bipolar bar (centre line, grows up for positive, down for negative). Indicates a CPU-evaluated signal that other surface elements can be modulated from via routes. See §11.
+- **Video mod source (`vmod_out`)** — same as `mod_out` but the signal is a per-pixel video texture. Routes to a target apply the texture sample at the target's UV. Shows a thumbnail preview of the texture in the cell. See §11.
+- **Selector (`selector`)** — picks one of N labeled "branch" expressions. Only the selected branch reaches the GPU shader; the unselected branches are dropped at compile time, so each option can be as expensive as you want. Switching triggers a hot recompile. See §5.3 for the DSL and UI.
 
 All surface elements accept an optional string label as the last argument: `knob(0, 0, "volume")`, `seq(0, 0, 16, "kick")`.
 
@@ -377,6 +403,104 @@ ad(button(0), 0.01, 0.3) >> mul(_, rgba(1, 1, 1, 1))
 // Toggle gates a feedback decay
 ar(toggle(0), 0.2, 1.0) >> mul(_, fin(0)) >> fout(0)
 ```
+
+### 5.3 Selectors (path-switching)
+
+A `selector` is a control element that picks one of N **homogeneously-typed
+branch expressions**. The compile-time `lower_selectors` pass replaces the
+node with the single selected branch — unselected branches are dropped from
+the AST and never reach codegen, so each option can be arbitrarily expensive.
+Switching the selection bumps `selector_version` and the live loop
+hot-recompiles to swap the branch.
+
+**Syntax**
+
+```text
+selector("name",
+  "label1", expr1,
+  "label2", expr2,
+  ...)
+```
+
+The first argument is a name string used to identify the selector across hot
+reloads (the compiler appends `#NN` to disambiguate multiple call sites with
+the same name — `shape#10`, `shape#14`, etc.). Then alternating
+`("label", expression)` pairs define each branch. Optional placement
+`(col, row)` may appear right after the name:
+
+```text
+selector("dist", 4, 0,           // explicit (col, row)
+  "through",  in,
+  "rotozoom", rotozoom(in),
+  "tear",     tear(in))
+```
+
+Without explicit placement the auto-layout pass positions the selector — the
+typical pattern is to wrap it in `col(...)` / `row(...)` / `section(...)`.
+
+**Common patterns**
+
+- *Picking a noise source:* one selector that swaps between several noise
+  generators, all returning a `vec4`.
+- *Distortion stages:* a `selector("dist", "through", in, "rotozoom",
+  rotozoom(in), …)` per stage in a feedback chain — `"through"` returns the
+  input unchanged, useful as a no-op default.
+- *Mod-source choice:* swap between `0`, `knob("value")`, an LFO, an
+  envelope, etc. inside a `mod_unit() + mod_unit() + mod_unit()` sum.
+
+**UI behaviour**
+
+| Surface | Interaction |
+|---------|-------------|
+| Web UI / native UI | Each branch label is a button under the selector cell; tap to switch. |
+| Push controller    | Selectors live next to other surface elements on the pad grid. Hold the selector pad to enter selector mode (top-row encoders scroll through branches), tap to commit. |
+
+Switching is **synchronous on first touch**: the live loop blocks until the
+new branch's shader has compiled, but the selector cache pre-warms every
+one-flip-away neighbour after each compile, so a freshly-loaded program
+hangs only on the *first* unique selection of each selector. Switches
+between cached variants are near-instant.
+
+**Sectioning** — selectors take their section from the surrounding
+`section(...)` wrapper. Selectors at the AST root (post-inlining) — e.g. a
+`fn fb_clip(in) = selector(...)` called mid-pipeline — land in an implicit
+"ungrouped" track at the rightmost edge of the surface.
+
+### 5.4 Snapshots (save / recall)
+
+The native `--ui` server exposes **eight snapshot slots** (header strip, top
+right). Each slot persists every element value, every selector index, and
+every modulation route — the complete operator state minus the source code.
+
+| Action            | Trigger                                |
+|-------------------|----------------------------------------|
+| Save to slot N    | Shift-click the empty Nth slot dot     |
+| Recall slot N     | Click an occupied slot dot             |
+| Clear slot N      | Alt-click the slot dot                 |
+
+Slots survive program hot reload (the snapshot replays its values onto
+elements that match by `(label, kind, col, row)` — anything that no longer
+exists is silently skipped). They DO NOT survive an `--ui` server restart,
+unless you've also enabled the auto-save state file (see hot-reload below).
+
+**On the Push controller**, the eight Scene buttons mirror slot 1-8 with the
+same shift / alt modifiers via the encoders.
+
+**Hot reload + state persistence** — When you save a `.grain` file under
+`--live`, the loop:
+
+1. Recompiles the program.
+2. Builds a new surface.
+3. Carries every operator value across by `(label, kind, col, row)` match —
+   knobs keep their values, toggles their state, sequencers their patterns,
+   selectors their branch index (when the option list still matches),
+   modulation routes their depth.
+4. Preserves stable element ids so any in-flight WS click still targets the
+   right element after the swap.
+
+This means safe edits (renaming a label, changing arithmetic, adding/removing
+elements outside your edit area) DO NOT reset operator state — only
+elements that genuinely changed shape get reset to their defaults.
 
 ---
 
@@ -772,6 +896,48 @@ play("frames/")
 | `autotile("path.png", grid_x, grid_y, input)` | Same, with an explicit grid size override. |
 | `autotile("path.png", grid_x, grid_y, input, threshold)` | Same, with a custom on/off threshold (default 0.5). |
 
+#### Asset layout
+
+The tileset path argument is the name of a **directory**, not a single
+image. Each frame is a separate PNG/JPG inside that directory; loading
+sorts the file list lexicographically and stacks them as texture layers.
+
+```
+tilesets/
+  tileset1/
+    01.png         ← layer 0
+    02.png         ← layer 1
+    …
+    16.png         ← layer 15
+  tileset2/
+    __0001.png     ← any naming works as long as sort order is correct
+    __0002.png
+    …
+```
+
+Path resolution walks ancestor directories of the source `.grain` file: the
+loader looks for `<ancestor>/tileset1/` and `<ancestor>/tilesets/tileset1/`
+at every level up to the filesystem root. The conventional layout is a
+`tilesets/` directory next to the source.
+
+**Browser (wasm) loading.** The browser can't read directories, so the web
+app fetches `/tilesets/<name>/manifest.json` first, then each image listed
+in it. The dev server's vite middleware generates the manifest on the fly;
+production builds bake one alongside each tileset:
+
+```json
+{ "kind": "normal", "files": ["01.png", "02.png", ...] }
+```
+
+`kind` is `"normal"` for `tileset` / `tileset_px` and `"auto"` for
+`autotile`. The wasm session caches uploads — referenced tilesets are
+fetched once per session, then registered with `register_tileset`.
+
+GitHub Pages requires a `.nojekyll` marker at the deploy root so files
+beginning with `_` (e.g. `__0001.png` from video-extracted frames) aren't
+silently dropped by the Pages Jekyll build. The deploy script handles this
+automatically.
+
 ### 6.10 Feedback utilities
 
 | Block | Description |
@@ -1068,7 +1234,7 @@ See the `examples/` directory:
 | `22_repeat_grid.grain` | `repeat_grid`, `cell_cx`/`cell_cy`, size by position |
 | `24_render_at.grain` | `render_at` + `sample_at` for low-res grid modulation |
 | `25_sequencer.grain` | `seq`, `toggle`, `button`, `ar` envelopes (use with `--live --bpm 120`) |
-| `26_noise_combo.grain` … `75_full_combo.grain` | Complex combos: noise, gradients, shapes, LFOs, blends, input, feedback. Also includes rhythm-type demos (`30_rhythm_math`, `31_rhythm_swing`, `32_rhythm_polyrhythm`, `33_clave`), MIDI output (`34_midi_note`, `35_midi_cc`), sample-and-hold (`36_sample_hold`), and infix operators (`41_infix_ops`). |
+| `26_noise_combo.grain` … `75_full_combo.grain` | Complex combos: noise, gradients, shapes, LFOs, blends, input, feedback. Also includes rhythm-type demos (`30_rhythm_math`, `31_rhythm_swing`, `32_rhythm_polyrhythm`, `33_clave`), MIDI output (`34_midi_note`, `35_midi_cc`), sample-and-hold (`36_sample_hold`), and infix operators (`41_infix_ops`). The full set numbers ~180 files; high-numbered ones (200+ vector, 300+ language features) are listed individually below. |
 | `76_dither_palette.grain` | `palette_n`, dither (uncomment lines for `dither_bayer` / `dither_threshold` / `palette`) |
 | `77_floor_fract.grain` … `126_mega_combo.grain` | 50 more: medium simple → super complex (math, noise, shapes, LFOs, blends, input, feedback, render_at, palette) |
 | `127_mirror.grain` | `mirror` — four-way reflected tiling (use with `-i`) |
@@ -1095,7 +1261,9 @@ See the `examples/` directory:
 | `200_vsvg_inline.grain`, `201_vsvg_curves.grain` | `vsvg` — inline SVG path-data and curves |
 | `202_raster_fill.grain`, `203_raster_outline.grain` | `raster_fill` / `raster_outline` — vector → raster bridge |
 | `300_placeholders.grain` | `<>` / `<lo..hi>` placeholders — drives `--population` / `--mutate` / `--resolve` |
-| `301_conditions.grain` | `if` / `gt` / `lt` / `eq` / `between` / `mask_and` / `mask_or` / `mask_not` |
+| `301_conditions.grain` | `if` / `gt` / `lt` / `eq` / `between` / `mask_and` / `mask_not` |
+| `302_lambdas.grain` | `\|param\| body` lambda expressions and higher-order use |
+| `302_video_modulation.grain` | `vmod_out` end-to-end — per-pixel modulation of a knob via a noise field |
 
 **Run the example test suite:** `cargo test --workspace` runs a parse-check over every `.grain` file in `examples/` as part of the standard test suite.
 
@@ -1275,28 +1443,46 @@ identically to a `--seed 3` run and is safe to commit.
 
 Modulation lets a signal computed inside the program drive a control element
 (knob, toggle, button, radio, pressure) live, without touching the program
-source. You **expose** a signal as a routable source with `mod_out(...)` and
-then **route** it to one or more targets from the web UI or the Push.
+source. You **expose** a signal as a routable source with `mod_out(...)`
+(scalar) or `vmod_out(...)` (per-pixel video) and then **route** it to one
+or more targets from the web UI or the Push.
 
-### Exposing a signal
+### Exposing a scalar signal
 
 Wrap any scalar expression with `mod_out`. The runtime evaluates it once per
-frame on the CPU and pushes the result into a corresponding `mod_source`
-control surface element so it can be routed.
+frame on the CPU, pushes the result into a corresponding `mod_source`
+surface element (so it can be routed), AND **substitutes the value back
+into the surrounding expression** so signal flow can use it directly. The
+return value is the same scalar that was passed in — `mod_out` is
+value-passing, not a discard sink.
 
 ```text
-let lfo = sin(time * 2)               // bipolar, -1..1
-let env = audio_env(low: 40, high: 120) * 0.8  // unipolar, scaled
-let _   = mod_out(lfo)                // auto-positioned mod source
-let _   = mod_out(env, 0, 7, "env")   // explicit (col, row, label)
+fn lfo()  = mod_out(sin(time * 2), "lfo")
+fn env()  = mod_out(audio_env(low: 40, high: 120) * 0.8, "env")
+fn beat() = mod_out(ar(beat(1), 0.05, 0.05), "beat")
+
+// Three modulators summed into the signal flow:
+section("mod", lfo() + env() + beat()) + shape >> ...
 ```
+
+Each `mod_out(...)` call here both (a) registers a routable source with the
+given label and (b) contributes its current value to the sum. Until the
+2026-05-03 fix, `mod_out` returned a literal `0` to its surrounding
+expression — so the same program produced a static image with all three
+modulators silently no-op'd. If you wrote `let _ = mod_out(lfo)` in older
+code purely to register the source, you can drop the `let _ =` (the value
+is no longer wasted).
 
 Forms:
 
-| Form                                  | Layout                                              |
-|---------------------------------------|-----------------------------------------------------|
-| `mod_out(signal)`                     | auto-positioned in the next free surface cell       |
-| `mod_out(signal, col, row, "label")`  | placed at `(col, row)` with the given label         |
+| Form                                          | Layout                                              |
+|-----------------------------------------------|-----------------------------------------------------|
+| `mod_out(signal)`                             | auto-positioned, label defaults to `M{N}`           |
+| `mod_out(signal, "label")`                    | auto-positioned, explicit label                     |
+| `mod_out(signal, col, row)`                   | placed at `(col, row)`, default label               |
+| `mod_out(signal, col, row, "label")`          | placed at `(col, row)` with the given label         |
+
+(The same forms apply to `vmod_out`, see §11.4.)
 
 Mod sources are **bipolar** — no clamping at the source. The web UI shows a
 center-line bar that grows up for positive values and down for negative ones.
@@ -1347,16 +1533,48 @@ target's base value each frame, then mapped per kind:
 Multiple sources can route into the same target — their contributions are
 summed before the per-kind mapping is applied.
 
+### 11.4 Video modulation (`vmod_out`)
+
+`vmod_out(signal, …)` is the per-pixel cousin of `mod_out`. The signal is
+evaluated **per pixel in its own fragment pass** and stored in a
+full-resolution texture. When a surface target has a *video route* pointing
+at a `vmod_out` source, the target's shader use sites expand to:
+
+```text
+base + depth * sample(vmod_tex, uv)
+```
+
+— spatially varying modulation, instead of a single scalar applied
+everywhere. The route plumbing (UI selection, depth slider, Push pads) is
+identical to scalar routes; the runtime infers `Scalar` vs `Video` from the
+source kind when you call `set_route`.
+
+Use cases:
+- Drive a `knob` value differently across the frame with a noise field —
+  e.g. a "brightness" knob that varies according to perlin noise.
+- Treat a feedback buffer as the modulator so the past frame shapes the
+  control surface.
+
+```text
+fn brightness_field() =
+  vmod_out(perlin(uv_x, uv_y, time, 4) * 0.5, "field")
+```
+
+`vmod_out` differs from `mod_out` in two ways: the return value is the
+texture (not a scalar), and the value flows through the GPU rather than
+being CPU-evaluated every frame.
+
 ---
 
 ## 12. Not yet implemented
 
 - `delay` — ring-buffer frame delay
 - `edge:` keyword — wrap / black / clamp edge modes for spatial transforms and filters
-- `swing` — swung-beat rhythm function
 - `noise_at` — no longer needed: use `perlin_xyz(u, v, time, scale)` (or `voronoi_xyz`, etc.) to sample any noise family at arbitrary coordinates
 - `conv3` — 3×3 convolution kernel
 - `emboss`, `edge` — convolution-based filters
+
+(`swing` is implemented — see `examples/31_rhythm_swing.grain`.)
 
 ## 13. Potential performance improvements
 
@@ -1367,3 +1585,83 @@ When a pipeline's right-hand side has multiple `_`s (e.g. `prev >> dist_unit(_) 
 For chains like `dist`'s three-step blend, the duplication compounds: after three steps the upstream is recomputed up to seven times in the WGSL shader. Driver-level common-subexpression elimination usually catches the simple cases, but anything stateful (texture samples, perlin lookups, feedback-buffer reads) generally won't be merged.
 
 Proper fix: change `extract_feedback_from_expr`'s `LetIn` branch in `grain-compiler/src/dependency_graph.rs` so the value becomes its own synthetic top-level block (`__pipe_<n>`) and references to the binding lower to a `NameRef`/dep edge to that block. The block runs once per frame and downstream blocks sample its output texture instead of re-evaluating the expression. Worth doing when a real perf bottleneck appears in pipelines that chain expensive operations through multi-`_` blends.
+
+---
+
+## 14. Browser / wasm web app
+
+Grain ships as a self-contained web application that runs entirely in the
+browser via `wasm-bindgen` + WebGPU. It's hosted at
+<https://sebastianpfluegelmeier.github.io/grain-pub/> and installable as a
+PWA on iOS / Android / desktop.
+
+### What it does
+
+- **Editor panel** — Codemirror-based editor for `.grain` source with LSP
+  diagnostics (compile errors highlighted inline).
+- **Surface panel** — auto-generated controls for every surface element
+  in the program (knobs / toggles / buttons / selectors / sequencers /
+  pressure / audio_env). Same protocol as the native `--ui` server.
+- **Inputs panel** — file pickers for `in(0)` and `in(1)` (still images
+  only on the web app; videos play via native `--input` only).
+- **Render panel** — output dimensions, fps, recording start/stop. The
+  recorder captures the live preview to a WebM blob.
+- **Guide panel** — renders this `USERGUIDE.md` from the deployed assets.
+- **Status panel** — wasm load state, render frame count, compile errors,
+  startup log, generated WGSL blocks.
+
+### Mobile layout
+
+Below 900 px viewport width, the panels become **bottom sheets**:
+single-select (one panel at a time covers ~62 % of the viewport), with the
+canvas always visible above. Each sheet supports finger drag-to-dismiss:
+swipe down past 30 % of the sheet height (or a > 250 px flick) closes it,
+otherwise it springs back to position. Drag only initiates from the top
+~50 px of the sheet (header / pill area), so taps inside scrollable content
+still scroll. Animations use the native iOS sheet curve
+(`cubic-bezier(0.32, 0.72, 0, 1)`, 220 ms) for the snap-close / spring-back
+phases, while the live finger-tracking phase has no transition.
+
+### State persistence
+
+Every panel toggle, source edit, and surface element value is persisted to
+`localStorage` under `grain.*` keys. Reloading the tab restores the editor
+contents, panel layout, and surface state — anything the live server
+exposes via `state_json()`.
+
+### Browser-only caveats
+
+- WebGPU is required (Chrome 113+, Edge 113+, Safari 17+, Firefox Nightly).
+  The status panel reports `BrowserWebGpu (Vendor, Backend)` on success
+  and shows the wasm error otherwise.
+- Audio input (`audio_env`) requires `getUserMedia` permission; granted on
+  the first surface element that needs it.
+- Tilesets must ship with a `manifest.json` (see §6.9). The deploy script
+  generates manifests automatically.
+- WebM recording works in Chrome / Edge; Safari and Firefox have partial
+  codec support and the recorder may produce a fixed-rate MP4 fallback.
+- Push controllers / native MIDI are not exposed to the browser app —
+  use Web MIDI for `cc` / `note` input only (no Push pad surface yet).
+
+### Selector swaps in the browser
+
+When you tap a selector branch in the web app, the wasm session schedules
+a **deferred recompile** for the next render tick. The synchronous compile
+would otherwise block the JavaScript thread and freeze the UI for several
+seconds on cold-cache shaders; the deferred path keeps the UI responsive
+and lets the spinner update while the worker compiles.
+
+### Running locally
+
+```bash
+cd grain-web-app
+npm install
+npm run dev          # vite dev server with hot reload + LSP
+npm run build        # production bundle into dist/
+
+# Or build + deploy to ../grain-pub:
+bash scripts/deploy-gh-pages.sh
+```
+
+The deploy script also writes the `.nojekyll` marker into `grain-pub/` so
+GitHub Pages doesn't strip files starting with `_`.
