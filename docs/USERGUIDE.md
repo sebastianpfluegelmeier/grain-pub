@@ -1358,6 +1358,12 @@ When built with the `live` feature and run with `--ilda` (Ether Dream DAC), `--h
 | `vpoly(cx, cy, radius, sides)` | Regular polygon outline with `sides` vertices. |
 | `vsvg(source, cx?, cy?, scale?, index?)` | Vector path from an SVG file, inline path-data string, or folder of SVGs. See below. (`time` is an alias for `index` — `.time(t)` reads naturally for animated playback.) |
 | `vrepeat(\|i\| body, n)` | Repeat a vector body `n` times. The lambda's parameter is bound to the integer index `0..n-1` each iteration; use it to position copies manually. Iterations are joined with blanking so disjoint shapes stay disjoint. |
+| `vparam(\|t\| body, n)` | Sample a parametric curve. Evaluates `body` at `n` evenly-spaced `t` in `[0, 1)` and emits the results as one connected polyline (so the laser draws a continuous path, not `n` jumps). Body is typically `vdot(x(t), y(t))`. Unlocks Lissajous, rose curves, spirographs, traveling waves, etc. as one-liners. |
+| `vresample(input, n)` | Redistribute the input polyline's vertices to `n` evenly-spaced points along its arc length. Auto-detects open vs closed paths via first/last point proximity. Use to cap point budget on over-sampled `vparam` output, make laser dwell uniform, or normalise point counts before `vmorph`. |
+| `vsimplify(input, tolerance)` | Douglas-Peucker decimation: drops vertices whose perpendicular distance to the chord between their kept neighbours is below `tolerance` (in UV units). Silhouette preserved within `tolerance`. Pair with `vresample` if a fixed count is needed afterwards. |
+| `vsmooth(input, tension, subdivisions)` | Catmull-Rom spline smoothing. Each input segment becomes `subdivisions` samples along a curve blending linear (`tension=0`) ↔ full cardinal spline (`tension=1`). Open/closed inputs handled automatically. Output count is roughly `subdivisions × segments`. |
+| `vsampled(input, trigger, dx, dy)` | Sample-and-hold with per-vertex drift. While `trigger > 0.5`, re-samples live `input` and passes through (cumulative drift resets). While `trigger ≤ 0.5`, keeps the stored polyline and displaces each vertex per frame by `(dx, dy)` evaluated at *that* vertex's position (same per-vertex contract as `warp`). Drop a curl/perlin/`domain_warp` field into `dx`/`dy` for vector flow; a constant for uniform drift. Pair with `impulse()` for rising-edge one-shot capture. Pre-arm output falls through to live input (never empty). |
+| `vfb(\|prev\| body, init)` | Vector feedback loop. Frame 0 outputs the evaluated `init`; subsequent frames output `body` with `prev` bound to last frame's output. Point count is preserved as long as the body doesn't grow it (avoid `+ shape` inside the loop). Typical idioms: `vfb(\|p\| rotate(p, 0.01), liss(3, 2))` for a slow spiral, `vfb(\|p\| warp(p, cx*j, cy*j), seed_circle)` for flow-field motion. |
 | `vmorph(a, b, t)` | Smoothly blend between two vector shapes. Both shapes are resampled along their arc length (capped at 512 points) and the cyclic shift that minimises pairwise distance is picked, so corresponding points line up before interpolation. `t` in `[0, 1]` mixes from `a` to `b`. |
 | `vslice(input, start, end)` | Emit only the arc-length subrange `[start, end]` of a vector path (`0` = start of path, `1` = end). When `start > end` the slice wraps across the seam, useful for animated path reveals. |
 | `vwindow(input, mid, fraction)` | Emit a window of `fraction` of the input path's arc length centered on `mid` (both in `[0, 1]`). Wraps across the seam when the window crosses 0/1, so animating `mid` slides a smooth scrolling head along a closed loop. `fraction=0` emits nothing; `fraction>=1` passes the full path through. |
@@ -1435,6 +1441,48 @@ vrepeat(|i| vcircle(0.5 + cos(i * 2.4 + time) * i * 0.02,
                     0.5 + sin(i * 2.4 + time) * i * 0.02,
                     0.01),
         50) >> vout
+```
+
+**`vparam` — parametric curves.** Where `vrepeat` emits `n` separate shapes joined by blanking, `vparam` emits one connected polyline sampled along a continuous curve — exactly what a laser wants for smooth path tracing. `t` is normalised to `[0, 1)` (not inclusive of 1) so closed curves wrap cleanly with no seam-duplicate point. The lambda's first output point is what's kept per sample, so `vdot(x(t), y(t))` is the canonical body.
+
+```text
+// Lissajous: 3-vs-2 frequencies, 200 samples
+vparam(|t| vdot(0.5 + 0.4 * cos(t * 3 * pi2),
+                0.5 + 0.4 * sin(t * 2 * pi2)), 200) >> vout
+
+// Rose curve r = cos(k·θ)
+vparam(|t| vdot(0.5 + 0.4 * cos(5 * t * pi2) * cos(t * pi2),
+                0.5 + 0.4 * cos(5 * t * pi2) * sin(t * pi2)), 256) >> vout
+```
+
+`vresample`, `vsimplify`, `vsmooth` are stateless pipeline operators — they take a vector input and return a transformed vector. They compose freely:
+
+```text
+// Cap an over-sampled curve at 128 points
+vparam(|t| ..., 1000) >> vresample(_, 128) >> vout
+
+// Smooth out an SVG, then decimate noise
+vsvg("logo.svg") >> vsmooth(_, 0.5, 8) >> vsimplify(_, 0.002) >> vout
+```
+
+**`vsampled` — sample-and-hold with drift.** Holds a snapshot of `input` and drifts each vertex per frame. The `trigger` gate decides whether to re-sample (gate high → live passthrough + reset drift) or hold (gate low → frozen polyline drifts each frame). Combine with `impulse(...)` for one-shot capture on a button press:
+
+```text
+// On button "snap": capture live input, then let curl noise drift it
+vsampled(vparam(|t| vdot(cos(t*pi2)*0.4+0.5, sin(t*pi2)*0.4+0.5), 200),
+         impulse(button("snap")),
+         curl_x * 0.005,
+         curl_y * 0.005) >> vout
+```
+
+**`vfb` — vector feedback.** Mirror of scalar `fb` for polylines: the lambda's `prev` argument is bound to the previous frame's output. Frame 0 outputs `init`. Hot-reloading a program that reorders stateful primitives produces one wrong frame before re-stabilising — same caveat as scalar feedback.
+
+```text
+// Slow spiral: rotate the previous frame's curve a hair each frame
+vfb(|p| rotate(p, 0.01), liss(3, 2)) >> vout
+
+// Flow-field motion: warp the previous frame by a curl field
+vfb(|p| warp(p, curl_x * 0.003, curl_y * 0.003), seed_circle) >> vout
 ```
 
 **`vout` — vector output sink**: every vector primitive has to flow into `vout` to be sent to the DAC / ILDA file. Two forms:
