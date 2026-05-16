@@ -22,7 +22,13 @@
     <meta name="theme-color" content="#0a0a0a" />
     <style>
       html, body {
-        margin: 0; padding: 0; height: 100%;
+        margin: 0; padding: 0;
+        /* `100dvh` so html/body cover the full visual viewport on iOS
+           Safari PWA, including the home-indicator unsafe area. With
+           plain `100%` the canvas (height: 100%) was stopping short of
+           the indicator and leaving a black bar. */
+        height: 100dvh;
+        min-height: 100dvh;
         background: #0a0a0a; color: #ddd;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         /* iOS Safari ignores `user-scalable=no` for double-tap-zoom in
@@ -38,16 +44,12 @@
         overscroll-behavior: none;
       }
       canvas#grain-canvas {
-        /* Force coverage of the visual viewport including the iOS
-           home-indicator unsafe area. iOS Safari PWA can otherwise
-           resolve `height: 100%` / clientHeight to the layout
-           viewport, which is shorter than the visible screen and
-           leaves a black bar below the canvas. */
         position: fixed;
-        inset: 0;
-        width: 100vw;
-        height: 100vh;
-        min-height: 100dvh;
+        top: 0; left: 0;
+        width: 100%;
+        /* html/body are 100dvh, so 100% here resolves to the full
+           visual viewport including the home-indicator unsafe area. */
+        height: 100%;
         z-index: 0; background: #000;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
@@ -79,7 +81,7 @@
       body.tiles-active .panel-bar,
       body.tiles-active .status-footer { display: none !important; }
     </style>
-    <script type="module" crossorigin src="/grain-pub/assets/index-CutfzUNX.js"></script>
+    <script type="module" crossorigin src="/grain-pub/assets/index-D30zYfnO.js"></script>
     <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-Bkicbhvz.css">
   </head>
   <body>
