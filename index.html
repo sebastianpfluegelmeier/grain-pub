@@ -45,11 +45,17 @@
       }
       canvas#grain-canvas {
         position: fixed;
-        top: 0; left: 0;
-        width: 100%;
-        /* html/body are 100dvh, so 100% here resolves to the full
-           visual viewport including the home-indicator unsafe area. */
-        height: 100%;
+        /* iOS Safari PWA treats `100%`, `100vh`, `100dvh` and `inset: 0`
+           as the page's visual viewport — which EXCLUDES the
+           home-indicator unsafe area. The canvas was ending right at
+           the status footer and leaving a black strip below. Anchor
+           by all four edges with negative offsets equal to the safe-
+           area insets so the canvas pokes into the unsafe regions and
+           covers the entire screen. */
+        top: calc(0px - env(safe-area-inset-top, 0px));
+        right: calc(0px - env(safe-area-inset-right, 0px));
+        bottom: calc(0px - env(safe-area-inset-bottom, 0px));
+        left: calc(0px - env(safe-area-inset-left, 0px));
         z-index: 0; background: #000;
         image-rendering: pixelated;
         image-rendering: crisp-edges;
@@ -81,7 +87,7 @@
       body.tiles-active .panel-bar,
       body.tiles-active .status-footer { display: none !important; }
     </style>
-    <script type="module" crossorigin src="/grain-pub/assets/index-D30zYfnO.js"></script>
+    <script type="module" crossorigin src="/grain-pub/assets/index-15lGSZcN.js"></script>
     <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-Bkicbhvz.css">
   </head>
   <body>
