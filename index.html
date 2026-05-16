@@ -59,9 +59,15 @@
          positioned, opt-in to staying visible). */
       body.fs-mode .panel-bar,
       body.fs-mode .overlay { display: none !important; }
+
+      /* Surface-active mode (mobile only — see App.svelte): the surface
+         grid is the whole viewport, so the panel-bar and status footer
+         are hidden. Drag-to-dismiss closes the sheet. */
+      body.surface-active .panel-bar,
+      body.surface-active .status-footer { display: none !important; }
     </style>
-    <script type="module" crossorigin src="/grain-pub/assets/index-knFURT_V.js"></script>
-    <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-CcFLD_xD.css">
+    <script type="module" crossorigin src="/grain-pub/assets/index-D-gJSLs9.js"></script>
+    <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-BO19orvO.css">
   </head>
   <body>
     <canvas id="grain-canvas"></canvas>
