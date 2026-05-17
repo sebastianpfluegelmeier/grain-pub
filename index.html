@@ -84,8 +84,17 @@
       /* Tiles editor: same treatment as surface-active. */
       body.tiles-active .panel-bar,
       body.tiles-active .status-footer { display: none !important; }
+
+      /* Editor fullscreen mode (drag editor handle > 80%): hide the top
+         panel-bar and the bottom status pill so the editor truly fills the
+         screen. Belt-and-suspenders force-hide the editor's row2 action
+         buttons too, in case the inline `style:display` directive races
+         the CSS-class apply. */
+      body.editor-fs .panel-bar,
+      body.editor-fs .status-footer { display: none !important; }
+      body.editor-fs .program-row2  { display: none !important; }
     </style>
-    <script type="module" crossorigin src="/grain-pub/assets/index-C-zdWiGX.js"></script>
+    <script type="module" crossorigin src="/grain-pub/assets/index-CIo1r1o7.js"></script>
     <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-mqNBcrMu.css">
   </head>
   <body>
