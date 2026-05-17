@@ -4,9 +4,11 @@
     <meta charset="UTF-8" />
     <!-- `user-scalable=no, maximum-scale=1` disables pinch-to-zoom AND the
          iOS double-tap zoom so taps on UI controls don't accidentally
-         change page zoom. `interactive-widget=resizes-content` keeps the
-         on-screen keyboard from collapsing the canvas under the layout. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+         change page zoom. `interactive-widget=overlays-content` keeps the
+         layout viewport fixed when the soft keyboard / hardware-keyboard
+         accessory bar appears — they overlay instead of shrinking content,
+         so the fullscreen canvas + UI don't shift on focus. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
     <title>grain</title>
     <!-- PWA / "Add to Home Screen" tags. On iOS Safari, real fullscreen
          (no URL bar / no tab bar) is only available when the page is
@@ -94,7 +96,7 @@
       body.editor-fs .status-footer { display: none !important; }
       body.editor-fs .program-row2  { display: none !important; }
     </style>
-    <script type="module" crossorigin src="/grain-pub/assets/index-DoOduaEg.js"></script>
+    <script type="module" crossorigin src="/grain-pub/assets/index-m5W5u2d6.js"></script>
     <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-EjrAEr71.css">
   </head>
   <body>
