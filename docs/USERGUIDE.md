@@ -1846,17 +1846,43 @@ audio-rate sync are free):
 - `delay_ms(input, time_ms)` — no feedback
 - `delay_ms(input, time_ms, feedback)` — circular buffer, max 2 s,
   feedback clamped to ±0.99
+- `delay_fb(input, time_ms, |x| body)` — feedback delay with a
+  per-sample processing lambda on the tap before the loop closes.
+  `body` must be 0-cycle-latency (no nested delay/reverb/sample) —
+  the lowerer rejects anything that would extend the round-trip
+  time. Use for filtered echoes (`|x| lpf(x, 800)`), saturated
+  feedback (`|x| tanh_shape(x * 0.6, 1.5)`), etc.
 
-**Dynamics**:
+**Dynamics & shaping**:
 
 - `compress(input, threshold_db, ratio, attack_ms, release_ms)` —
   feedforward; no makeup gain (apply yourself with `* X`)
+- `tanh_shape(input, drive)` — soft saturator. `tanh(x * drive)`.
+- `clip(input, threshold)` — hard clipper, caps at ±threshold.
+- `dc_block(input)` — 1-pole HPF (~38 Hz corner at 48 kHz) to
+  strip DC drift after saturators / long reverb tails.
+- `gain_db(input, db)` — multiply by `10^(db/20)`.
 
 **Reverb** (Freeverb halves; canonical use is inside a `stereo(...)`):
 
 - `reverb_l(input, room, damp)`, `reverb_r(input, room, damp)`
 - `room` ∈ [0, 1] → feedback 0.28..0.98
 - `damp` ∈ [0, 1] → in-loop LP coefficient 0..0.4
+
+**Stereo positioning** (equal-power pan halves; same pattern as reverb):
+
+- `pan_l(input, position)`, `pan_r(input, position)`
+- `position` ∈ [-1, 1]; -1 = full left, 0 = centre (both halves at
+  -3 dB), 1 = full right.
+
+**Sampling**:
+
+- `sample_ram("path.wav", playhead_sec)` — RAM-resident WAV playback.
+  Path is resolved relative to the source `.grain` file's directory.
+  Mono playback (channels averaged on load); linear-interp tap;
+  loop yourself with `playhead % length_sec`. Native only — the
+  browser worklet renders silence for sample_ram nodes until a
+  fetch + decodeAudioData bridge lands.
 
 **k→a conversion**:
 
@@ -1895,6 +1921,8 @@ See `examples/40*.grain`:
 - `404_audio_drone.grain` — three detuned saws + LPF + stereo reverb
 - `405_audio_filter_sweep.grain` — pink noise through an LFO-swept LPF
 - `406_audio_pump.grain` — beat-pumped saw bass + compressor
+- `407_audio_delay_fb.grain` — feedback delay with a filtered +
+  saturated lambda in the loop
 
 ---
 
