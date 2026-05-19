@@ -89,6 +89,21 @@ export class WorkletEngine {
         }
     }
     /**
+     * Insert (or replace) a decoded sample buffer. The main thread
+     * fetches the WAV / decodes via AudioContext.decodeAudioData and
+     * posts the resulting Float32Array here. The renderer doesn't see
+     * the new sample until the next `set_plan_json` rebuild.
+     * @param {string} path
+     * @param {Float32Array} samples
+     */
+    set_sample(path, samples) {
+        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.workletengine_set_sample(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+    }
+    /**
      * Write a scalar value (sent from the main-thread k-rate driver
      * via worklet `postMessage`). Caches the cell handle on first
      * touch so subsequent writes are a single atomic store.

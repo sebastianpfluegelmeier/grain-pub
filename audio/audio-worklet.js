@@ -41,6 +41,13 @@ class GrainAudioProcessor extends AudioWorkletProcessor {
           for (const [name, value] of Object.entries(msg.values)) {
             engine.set_scalar(name, value);
           }
+        } else if (msg.type === 'sample') {
+          // Main thread fetched + decoded a WAV; install it in the
+          // engine's sample registry. The currently-loaded renderer
+          // won't see it until the next 'plan' message rebuilds.
+          if (!engine) throw new Error('sample before init');
+          engine.set_sample(msg.path, msg.samples);
+          this.port.postMessage({ type: 'sample_loaded', path: msg.path });
         }
       } catch (err) {
         this.port.postMessage({ type: 'error', error: String(err) });

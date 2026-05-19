@@ -35,6 +35,13 @@ export class WorkletEngine {
      */
     set_plan_json(plan_json: string): void;
     /**
+     * Insert (or replace) a decoded sample buffer. The main thread
+     * fetches the WAV / decodes via AudioContext.decodeAudioData and
+     * posts the resulting Float32Array here. The renderer doesn't see
+     * the new sample until the next `set_plan_json` rebuild.
+     */
+    set_sample(path: string, samples: Float32Array): void;
+    /**
      * Write a scalar value (sent from the main-thread k-rate driver
      * via worklet `postMessage`). Caches the cell handle on first
      * touch so subsequent writes are a single atomic store.
@@ -57,6 +64,7 @@ export interface InitOutput {
     readonly workletengine_render_stereo: (a: number, b: number, c: number, d: any, e: number, f: number, g: any) => void;
     readonly workletengine_sample_rate: (a: number) => number;
     readonly workletengine_set_plan_json: (a: number, b: number, c: number) => [number, number];
+    readonly workletengine_set_sample: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly workletengine_set_scalar: (a: number, b: number, c: number, d: number) => void;
     readonly _start: () => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
