@@ -1747,7 +1747,158 @@ being CPU-evaluated every frame.
 
 ---
 
-## 12. Not yet implemented
+## 12. Audio synthesis
+
+Grain compiles to a CPU audio engine alongside the GPU video pipeline.
+Audio is opt-in: programs that don't declare an `audio { ... }` block
+run video-only and the audio device isn't touched.
+
+### 12.1 The `audio { ... }` block
+
+A single top-level block, parallel to the video expression. Has the
+same shape as a function body: `let` bindings followed by `out = <expr>`.
+
+```text
+audio {
+  let env = ar(midi_gate(0, 0, 127), 0.005, 0.2)
+  out = saw(midi_pitch(0, 0, 127)) * env * 0.2
+}
+```
+
+- All audio runs at **48 kHz f32**, regardless of the audio device's
+  native rate (native: cpal opens a 48 kHz output; web: the
+  AudioWorklet adapts via the AudioContext's sample rate).
+- Master out is **mono by default**. For explicit stereo write
+  `out = stereo(left_expr, right_expr)`.
+- Hot reload of the `.grain` file rebuilds the audio graph with a
+  5 ms crossfade — no clicks.
+
+### 12.2 Scalars inside the audio block
+
+The audio engine reads control-rate scalars (MIDI inputs, knobs,
+LFOs, sequencers) through a shared snapshot updated by the scalar
+driver. Two ways to wire a scalar into audio:
+
+1. **Inline.** Most scalar primitives can be written directly inside
+   the audio block; a pre-pass hoists them into synthetic top-level
+   bindings:
+
+   ```text
+   audio { out = sin(midi_pitch(0, 0, 127)) * 0.2 }
+   ```
+
+   Inline UI elements like `knob(...)` and `toggle(...)` auto-place
+   into the surface — no need to wrap them in `row(...)` / `col(...)`
+   yourself.
+
+2. **Named.** Bind the scalar at the top level and reference it by
+   name from inside the block:
+
+   ```text
+   let cutoff = knob(200..3000)
+   row(cutoff)
+   audio { out = saw(220) >> lpf(_, cutoff) * 0.3 }
+   ```
+
+### 12.3 Ramp vs sample-and-hold
+
+Scalars arrive 1000× per second; audio runs 48 000× per second. The
+engine bridges the rate gap per-input:
+
+- **Oscillator frequencies, filter cutoffs, delay times, envelope
+  attack/release, mixer gains** → **Ramped** (1 ms one-pole smoothing).
+  Knob jumps never zipper.
+- **Envelope gates** (`ar` / `ad` / `adsr`) → **Sample-and-hold**.
+  Rising-edge detection needs sharp transitions.
+
+`audio_rate(scalar)` overrides the default to force ramping anywhere.
+
+### 12.4 Primitives
+
+**Oscillators** — phase ∈ [0, 1); freq input is audio-rate (FM and
+audio-rate sync are free):
+
+- `sin(freq_hz)`, `saw(freq_hz)`, `square(freq_hz)`, `tri(freq_hz)`
+
+**Noise**:
+
+- `white()` — uniform xorshift, flat spectrum
+- `pink()` — Voss-McCartney 7-stage, -3 dB / octave
+- `brown()` — leaky integrator of white, -6 dB / octave
+
+**Filters** (state-variable, Q ≈ 0.707):
+
+- `lpf(input, cutoff_hz)`, `hpf(input, cutoff_hz)`, `bpf(input, cutoff_hz)`
+
+**Envelopes** (ported from the scalar evaluators, units in seconds):
+
+- `ar(gate, attack_s, release_s)` — one-shot; latches on rising edge,
+  runs attack-then-release to completion regardless of subsequent
+  gate transitions
+- `ar_gate(gate, attack_s, release_s)` — gated; releases immediately
+  on gate-off, even mid-attack
+- `ad(gate, attack_s, decay_s)` — attack to 1.0 while gated, decay
+  toward 0 otherwise
+- `adsr(gate, attack_s, decay_s, sustain, release_s)` — full ADSR
+
+**Delay**:
+
+- `delay_ms(input, time_ms)` — no feedback
+- `delay_ms(input, time_ms, feedback)` — circular buffer, max 2 s,
+  feedback clamped to ±0.99
+
+**Dynamics**:
+
+- `compress(input, threshold_db, ratio, attack_ms, release_ms)` —
+  feedforward; no makeup gain (apply yourself with `* X`)
+
+**Reverb** (Freeverb halves; canonical use is inside a `stereo(...)`):
+
+- `reverb_l(input, room, damp)`, `reverb_r(input, room, damp)`
+- `room` ∈ [0, 1] → feedback 0.28..0.98
+- `damp` ∈ [0, 1] → in-loop LP coefficient 0..0.4
+
+**k→a conversion**:
+
+- `audio_rate(scalar)` — force the smoothed (ramped) read at sites
+  that would default to sample-and-hold.
+
+**Master out**:
+
+- `out = mono_expr` — duplicates to every device channel
+- `out = stereo(left, right)` — explicit L/R; ch0 = L, ch1 = R,
+  extras get L
+
+### 12.5 Hot reload + debug
+
+On native (live mode), the audio engine starts the first time a
+program declares an `audio { ... }` block. Subsequent edits hot-swap
+the plan with a 5 ms crossfade. The HTTP debug endpoint `/audio_metrics`
+returns:
+
+```bash
+curl -s http://127.0.0.1:3000/audio_metrics | jq
+# { "sample_rate_hz": 48000, "peak": 0.21, "master_gain": 0.8,
+#   "is_open": true, "channels": 2 }
+```
+
+Returns 503 until the device opens.
+
+### 12.6 Worked examples
+
+See `examples/40*.grain`:
+
+- `400_audio_sine.grain` — minimum viable tone
+- `401_audio_monosynth.grain` — MIDI keyboard → saw + LPF + AR envelope
+- `402_audio_reverb.grain` — stereo Freeverb on the monosynth
+- `403_audio_fm.grain` — carrier + modulator FM
+- `404_audio_drone.grain` — three detuned saws + LPF + stereo reverb
+- `405_audio_filter_sweep.grain` — pink noise through an LFO-swept LPF
+- `406_audio_pump.grain` — beat-pumped saw bass + compressor
+
+---
+
+## 13. Not yet implemented
 
 - `delay` — frame-level ring-buffer video delay (the rhythm `delay(rhythm, n)` exists, but a per-frame video delay does not)
 - `edge:` keyword — wrap / black / clamp edge modes for spatial transforms and filters
@@ -1758,7 +1909,7 @@ being CPU-evaluated every frame.
 
 ---
 
-## 13. Browser / wasm web app
+## 14. Browser / wasm web app
 
 Grain ships as a self-contained web application that runs entirely in the
 browser via `wasm-bindgen` + WebGPU. It's hosted at
