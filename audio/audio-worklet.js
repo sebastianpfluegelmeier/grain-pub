@@ -56,10 +56,17 @@ class GrainAudioProcessor extends AudioWorkletProcessor {
     }
     const out = outputs[0];
     if (!out || !out[0]) return true;
-    // Mono render, then duplicate to every channel (typically stereo).
-    engine.render_mono(out[0]);
-    for (let ch = 1; ch < out.length; ch++) {
-      out[ch].set(out[0]);
+    if (out.length >= 2) {
+      // Stereo device output: ask the engine for L+R directly. Mono
+      // plans duplicate L → R inside the wasm renderer at zero cost,
+      // so this path is correct for both plan shapes.
+      engine.render_stereo(out[0], out[1]);
+      for (let ch = 2; ch < out.length; ch++) {
+        out[ch].set(out[0]);
+      }
+    } else {
+      // Mono device — render mono and write to the single channel.
+      engine.render_mono(out[0]);
     }
     return true;
   }

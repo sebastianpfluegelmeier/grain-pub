@@ -12,10 +12,20 @@ export class WorkletEngine {
     has_plan(): boolean;
     constructor(sample_rate_hz: number);
     /**
+     * 1 for mono plan, 2 for stereo, 0 if no plan loaded. The
+     * worklet picks render_mono vs render_stereo from this.
+     */
+    out_channels(): number;
+    /**
      * Pull `out.len()` mono samples into the JS-supplied Float32Array.
      * AudioWorklet's process() runs at 128-frame blocks by spec.
      */
     render_mono(out: Float32Array): void;
+    /**
+     * Fill two same-length Float32Arrays with the next block of L+R
+     * samples. Mono plans copy L → R inside the renderer.
+     */
+    render_stereo(left: Float32Array, right: Float32Array): void;
     sample_rate(): number;
     /**
      * Replace the current renderer with one built from a freshly
@@ -42,7 +52,9 @@ export interface InitOutput {
     readonly workletengine_clear_plan: (a: number) => void;
     readonly workletengine_has_plan: (a: number) => number;
     readonly workletengine_new: (a: number) => number;
+    readonly workletengine_out_channels: (a: number) => number;
     readonly workletengine_render_mono: (a: number, b: number, c: number, d: any) => void;
+    readonly workletengine_render_stereo: (a: number, b: number, c: number, d: any, e: number, f: number, g: any) => void;
     readonly workletengine_sample_rate: (a: number) => number;
     readonly workletengine_set_plan_json: (a: number, b: number, c: number) => [number, number];
     readonly workletengine_set_scalar: (a: number, b: number, c: number, d: number) => void;

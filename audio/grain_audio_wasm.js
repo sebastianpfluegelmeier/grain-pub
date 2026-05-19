@@ -35,6 +35,15 @@ export class WorkletEngine {
         return this;
     }
     /**
+     * 1 for mono plan, 2 for stereo, 0 if no plan loaded. The
+     * worklet picks render_mono vs render_stereo from this.
+     * @returns {number}
+     */
+    out_channels() {
+        const ret = wasm.workletengine_out_channels(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * Pull `out.len()` mono samples into the JS-supplied Float32Array.
      * AudioWorklet's process() runs at 128-frame blocks by spec.
      * @param {Float32Array} out
@@ -43,6 +52,19 @@ export class WorkletEngine {
         var ptr0 = passArrayF32ToWasm0(out, wasm.__wbindgen_malloc);
         var len0 = WASM_VECTOR_LEN;
         wasm.workletengine_render_mono(this.__wbg_ptr, ptr0, len0, out);
+    }
+    /**
+     * Fill two same-length Float32Arrays with the next block of L+R
+     * samples. Mono plans copy L → R inside the renderer.
+     * @param {Float32Array} left
+     * @param {Float32Array} right
+     */
+    render_stereo(left, right) {
+        var ptr0 = passArrayF32ToWasm0(left, wasm.__wbindgen_malloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = passArrayF32ToWasm0(right, wasm.__wbindgen_malloc);
+        var len1 = WASM_VECTOR_LEN;
+        wasm.workletengine_render_stereo(this.__wbg_ptr, ptr0, len0, left, ptr1, len1, right);
     }
     /**
      * @returns {number}
