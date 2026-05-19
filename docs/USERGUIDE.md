@@ -1875,6 +1875,14 @@ audio-rate sync are free):
 - `position` ∈ [-1, 1]; -1 = full left, 0 = centre (both halves at
   -3 dB), 1 = full right.
 
+**Karplus-Strong pluck**:
+
+- `pluck(freq_hz, trigger, decay)` — refills a delay line with
+  noise on every rising edge of `trigger`; the feedback loop's
+  1-pole LP (rate set by `decay` ∈ [0, 0.999]) shapes the noise
+  into a pitched, decaying tone. Works for plucks (decay 0.95+),
+  marimba-like hits (decay 0.5..0.8), and metallic clangs.
+
 **Sampling**:
 
 - `sample_ram("path.wav", playhead_sec)` — RAM-resident WAV playback.
@@ -1923,6 +1931,8 @@ See `examples/40*.grain`:
 - `406_audio_pump.grain` — beat-pumped saw bass + compressor
 - `407_audio_delay_fb.grain` — feedback delay with a filtered +
   saturated lambda in the loop
+- `408_audio_pluck.grain` — Karplus-Strong pluck sequence into
+  stereo reverb
 
 ---
 
