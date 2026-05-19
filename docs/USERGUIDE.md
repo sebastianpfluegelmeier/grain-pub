@@ -1885,12 +1885,15 @@ audio-rate sync are free):
 
 **Sampling**:
 
-- `sample_ram("path.wav", playhead_sec)` — RAM-resident WAV playback.
-  Path is resolved relative to the source `.grain` file's directory.
-  Mono playback (channels averaged on load); linear-interp tap;
-  loop yourself with `playhead % length_sec`. Native only — the
-  browser worklet renders silence for sample_ram nodes until a
-  fetch + decodeAudioData bridge lands.
+- `sample_ram("path", playhead_sec)` — RAM-resident sample playback.
+  Mono (channels averaged on load); linear-interp tap; loop yourself
+  with `playhead % length_sec`. Path resolution depends on the host:
+  - **Native (--live):** path is read from the filesystem, relative
+    to the source `.grain` file's directory.
+  - **Web:** the path is the name of an uploaded sample in the
+    "inputs" panel. Upload via the SampleManager UI (which also gives
+    you a waveform display + drag-able trim handles + a gain
+    slider). Trimmed/gained data is what the engine plays.
 
 **k→a conversion**:
 
