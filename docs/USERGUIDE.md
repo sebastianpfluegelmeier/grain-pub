@@ -1921,7 +1921,72 @@ curl -s http://127.0.0.1:3000/audio_metrics | jq
 
 Returns 503 until the device opens.
 
-### 12.6 Worked examples
+### 12.6 Web sample uploader UI
+
+The browser app's **inputs** panel has a per-sample manager that
+sits next to the image / tileset uploads. Use it to feed
+`sample_ram("name", t)` calls on the web side (the native build
+reads files from disk; the web build uses these in-browser uploads).
+
+Three ways to add a sample:
+
+- **Upload a file** — picks WAV / MP3 / FLAC / OGG; decoded via
+  `AudioContext.decodeAudioData`, downmixed to mono, stored in
+  IndexedDB under a name derived from the filename.
+- **Record from the mic** — `getUserMedia` + `MediaRecorder` with
+  echo cancellation / noise suppression / AGC all explicitly
+  disabled; the resulting clip lands as `mic_1`, `mic_2`, …
+- **Rename** — the name on each row is an editable input. Edit
+  and press Enter (or tap away) to commit. The IndexedDB key is
+  renamed in place and the old name is dropped from the audio
+  engine. Programs referencing the old name go silent for that
+  primitive — fail-soft rather than blocking the rename.
+
+Per sample, you get:
+
+- **Waveform display.** Min/max bucketed per pixel column; scales
+  with the displayed gain so clipping is visible — columns whose
+  post-gain peak crosses ±1 turn red and clamp to the canvas edge.
+- **Trim handles.** The two yellow vertical lines on the waveform
+  mark `startFrac` / `endFrac`. Drag either to retrim; the worklet
+  receives only the trimmed slice.
+- **Gain slider.** 0..2. Applied to the buffer before the worklet
+  sees it (so the in-program reference sees the post-gain signal).
+- **Play / stop preview** (▶ / ■). Auditions the trimmed+gained
+  slice via `AudioBufferSource`, independent of the worklet —
+  works even before any program references the sample.
+- **Live playhead.** Blue vertical line scrubbing the waveform
+  during preview.
+- **Delete.**
+
+The pill at the top of the panel shows the audio engine state
+(`not-started` / `suspended` / `running` / `closed`) plus the
+sample rate and worklet-ready flag. **tap to start audio** is
+shown until the context is `running`; **test tone** plays a 1-second
+440 Hz beep through a plain `AudioBufferSource` (bypasses the
+worklet) so you can isolate problems to the worklet path if the
+test tone works but synthesis doesn't.
+
+### 12.7 iOS notes
+
+- **Silent switch.** iOS treats WebAudio as UI sound by default,
+  which the physical side switch mutes. On first user gesture,
+  grain sets `navigator.audioSession.type = 'playback'` (Safari
+  16.4+) and starts a silent looping `<audio>` element as a
+  legacy fallback — both flip the page into media-playback mode,
+  so synth output respects the media-volume slider rather than
+  the ringer.
+- **AudioContext gesture binding.** iOS Safari only accepts
+  `click` / `touchend` (not `pointerdown`) as a user activation
+  event for autoplay purposes. The first such event on the page
+  creates the AudioContext and calls `resume()` synchronously
+  inside the same gesture.
+- **Stuck-suspended recovery.** If an early init bound the
+  AudioContext outside of a valid activation event (e.g. on an
+  older bundle), tapping **tap to start audio** a second time
+  closes the zombie context and rebuilds inside the new gesture.
+
+### 12.8 Worked examples
 
 See `examples/40*.grain`:
 
@@ -1936,6 +2001,8 @@ See `examples/40*.grain`:
   saturated lambda in the loop
 - `408_audio_pluck.grain` — Karplus-Strong pluck sequence into
   stereo reverb
+- `409_audio_kitchen_sink.grain` — bass + pad + pluck + bus
+  compression, half the audio primitives at once
 
 ---
 
