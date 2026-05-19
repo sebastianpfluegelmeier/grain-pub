@@ -1052,6 +1052,47 @@ hold_frames(beat(16), 30)
 
 ---
 
+### 6.11a Mini-notation patterns
+
+Single-quote `'…'` literals are Strudel-style mini-notation that
+lowers to a scalar value cycling through a step sequence. One cycle
+= one bar (= 4 beats). The lowered form is a select-ladder of
+`mix(prev, v_i, eq(idx, i, 0.5))` over the flattened steps, with
+`idx = floor((beats * N / 4) % N)`, so any video or audio expression
+that wants a beats-synced scalar can just use the pattern directly.
+
+| Form | Meaning |
+|------|---------|
+| `'1 2 3 4'` | 4 evenly-spaced steps per bar (sequence). |
+| `'1 [2 3] 4'` | Subdivision: step 2 plays `2` then `3` inside its slot. Nestable. |
+| `'1*4 2'` | `1` repeats 4 times inside its slot, then `2`. Sugar for `[1 1 1 1] 2`. |
+| `'1 ~ 2 ~'` | `~` is a rest — holds the previous value (or 0 at the start). |
+| `'1 . 2'` | `.` is repeat-last — same hold-previous behaviour. |
+| `'<a b c>'` | Alternation: one child per cycle. `<a b>` plays `a` in bar 0, `b` in bar 1, then back to `a`. |
+
+`<…>` composes with the slot operators: `'<1 2> 5'` cycles slot 0
+between `1` and `2` across bars while slot 1 stays at `5`.
+
+**Use in audio blocks:** A pattern literal inside `audio { ... }`
+is hoisted as a synthetic top-level scalar let and read back as a
+ramped `KrRead`, so:
+
+```text
+audio { out = saw('220 330 [440 880]') * 0.15 }
+```
+
+is equivalent to declaring the pattern at the top and referencing
+it by name — the per-input ramp on osc freq keeps step transitions
+smooth.
+
+**Limitations (MVP):**
+
+- Atoms are numbers only. No nested expressions, references, or
+  string atoms.
+- The bar-length constant is fixed at 4 beats.
+- More Strudel operators (`?` probability, `!` clone, `/N` slow,
+  `:` polyrhythm) are not implemented yet.
+
 ### 6.12 Rhythm type
 
 A richer alternative to `beat`/`euclidean`: composable **rhythm values** with operators for union, intersection, and difference. Periods use bar fractions (`1/4` = quarter, `1/8` = eighth, `1/16` = sixteenth), which reads like musical notation and composes cleanly under math.
@@ -2003,6 +2044,8 @@ See `examples/40*.grain`:
   stereo reverb
 - `409_audio_kitchen_sink.grain` — bass + pad + pluck + bus
   compression, half the audio primitives at once
+- `410_audio_pattern.grain` — Strudel-style `'<…>'` mini-notation
+  pattern feeding the saw oscillator's frequency
 
 ---
 
