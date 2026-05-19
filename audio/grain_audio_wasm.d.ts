@@ -47,6 +47,14 @@ export class WorkletEngine {
      * touch so subsequent writes are a single atomic store.
      */
     set_scalar(name: string, value: number): void;
+    /**
+     * Drop a previously-installed sample. The renderer's existing
+     * NodeKind::SampleRam keeps its own Arc<[f32]> so already-built
+     * plans don't change; new plan rebuilds resolve the path as
+     * missing (silence). Used by the SampleManager when a sample is
+     * renamed or deleted.
+     */
+    unset_sample(path: string): void;
 }
 
 export function _start(): void;
@@ -66,6 +74,7 @@ export interface InitOutput {
     readonly workletengine_set_plan_json: (a: number, b: number, c: number) => [number, number];
     readonly workletengine_set_sample: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly workletengine_set_scalar: (a: number, b: number, c: number, d: number) => void;
+    readonly workletengine_unset_sample: (a: number, b: number, c: number) => void;
     readonly _start: () => void;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

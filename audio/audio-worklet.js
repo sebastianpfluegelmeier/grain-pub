@@ -48,6 +48,9 @@ class GrainAudioProcessor extends AudioWorkletProcessor {
           if (!engine) throw new Error('sample before init');
           engine.set_sample(msg.path, msg.samples);
           this.port.postMessage({ type: 'sample_loaded', path: msg.path });
+        } else if (msg.type === 'unset_sample') {
+          if (!engine) return;
+          engine.unset_sample(msg.path);
         }
       } catch (err) {
         this.port.postMessage({ type: 'error', error: String(err) });

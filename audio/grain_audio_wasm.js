@@ -115,6 +115,19 @@ export class WorkletEngine {
         const len0 = WASM_VECTOR_LEN;
         wasm.workletengine_set_scalar(this.__wbg_ptr, ptr0, len0, value);
     }
+    /**
+     * Drop a previously-installed sample. The renderer's existing
+     * NodeKind::SampleRam keeps its own Arc<[f32]> so already-built
+     * plans don't change; new plan rebuilds resolve the path as
+     * missing (silence). Used by the SampleManager when a sample is
+     * renamed or deleted.
+     * @param {string} path
+     */
+    unset_sample(path) {
+        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.workletengine_unset_sample(this.__wbg_ptr, ptr0, len0);
+    }
 }
 if (Symbol.dispose) WorkletEngine.prototype[Symbol.dispose] = WorkletEngine.prototype.free;
 
