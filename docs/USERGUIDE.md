@@ -1944,6 +1944,32 @@ audio-rate sync are free):
     "inputs" panel. Upload via the SampleManager UI (which also gives
     you a waveform display + drag-able trim handles + a gain
     slider). Trimmed/gained data is what the engine plays.
+- `sample_bank(index, playhead_sec, "a.wav", "b.wav", …)` — single
+  reader with a runtime-selectable slot. `index` is floored and
+  clamped to `[0, N-1]`. Cheaper than wrapping N `sample_ram` calls
+  in `switch` (one reader, not N). Missing paths or out-of-range
+  slots render silence. Canonical drum-rack pattern:
+
+  ```grain
+  // Pick a kit slot from a knob, retrigger from start on each beat.
+  out = sample_bank(slot, trigger_ramp(beat, 1.0),
+                    "kick.wav", "snare.wav", "hat.wav")
+  ```
+
+- `trigger_ramp(trigger, speed)` — seconds-equivalent ramp since the
+  last rising edge on `trigger`, scaled by `speed`. Resets to 0 on
+  each new trigger. `speed=1` ≈ wall-clock seconds; `speed=2`
+  advances twice as fast (pitch ↑1 octave when used as a sample
+  playhead); `speed=0.5` half speed. Designed as a generic
+  retriggerable phasor — useful as `sample_ram`'s playhead for
+  triggered/pitched one-shot playback, or as a one-shot envelope
+  clock. Canonical sample trigger:
+
+  ```grain
+  // Plays "kick.wav" from the start each time gate rises, pitched
+  // one octave up.
+  out = sample_ram("kick.wav", trigger_ramp(gate, 2.0))
+  ```
 
 **k→a conversion**:
 
