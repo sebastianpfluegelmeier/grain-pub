@@ -1065,13 +1065,18 @@ that wants a beats-synced scalar can just use the pattern directly.
 |------|---------|
 | `'1 2 3 4'` | 4 evenly-spaced steps per bar (sequence). |
 | `'1 [2 3] 4'` | Subdivision: step 2 plays `2` then `3` inside its slot. Nestable. |
-| `'1*4 2'` | `1` repeats 4 times inside its slot, then `2`. Sugar for `[1 1 1 1] 2`. |
+| `'1*4 2'` | `1` repeats 4 times inside its slot (faster), then `2`. Sugar for `[1 1 1 1] 2`. |
+| `'1!3 2'` | `!N` inline-clones at the parent tempo — produces 4 evenly-spaced slots `1 1 1 2`. Differs from `*N` (one slot at higher speed) in that `!N` adds slots at the same step rate. |
+| `'(220 + 110) 440'` | Arithmetic atom — any expression inside `( … )` is parsed by the main grain parser. Useful for live-modulated atoms: `'(my_knob * 2) 440'`. Nestable parens supported. |
 | `'1 ~ 2 ~'` | `~` is a rest — holds the previous value (or 0 at the start). |
 | `'1 . 2'` | `.` is repeat-last — same hold-previous behaviour. |
 | `'<a b c>'` | Alternation: one child per cycle. `<a b>` plays `a` in bar 0, `b` in bar 1, then back to `a`. |
+| `slow(pat, n)` | Stretch the whole pattern over `n` bars instead of one. `slow('1 2 3 4', 2)` plays `1 2` in bar 0 and `3 4` in bar 1. `n` may be any scalar expression (constant, knob, etc.), so `slow(pat, knob(1..4))` works live. |
 
 `<…>` composes with the slot operators: `'<1 2> 5'` cycles slot 0
-between `1` and `2` across bars while slot 1 stays at `5`.
+between `1` and `2` across bars while slot 1 stays at `5`. `slow`
+multiplies the cycle length for both step- and alt-indexing, so
+`slow('<a b c>', 2)` advances the alt every 2 bars.
 
 **Use in audio blocks:** A pattern literal inside `audio { ... }`
 is hoisted as a synthetic top-level scalar let and read back as a
@@ -1087,11 +1092,15 @@ smooth.
 
 **Limitations (MVP):**
 
-- Atoms are numbers only. No nested expressions, references, or
-  string atoms.
-- The bar-length constant is fixed at 4 beats.
-- More Strudel operators (`?` probability, `!` clone, `/N` slow,
-  `:` polyrhythm) are not implemented yet.
+- Atoms are numbers OR parenthesised expressions. No bare-name
+  string atoms (`'kick snare'`) — use arithmetic-atom form
+  (`'(kick) (snare)'`) for now if the names refer to top-level
+  lets.
+- The bar-length constant is fixed at 4 beats; per-pattern time
+  signatures aren't user-configurable.
+- Not implemented: `a?p` probability gate, `[a, b]` polyrhythm,
+  `a:b` sample-bank mux. Polyrhythm + mux don't have an obvious
+  meaning in a monophonic scalar context anyway.
 
 ### 6.12 Rhythm type
 
