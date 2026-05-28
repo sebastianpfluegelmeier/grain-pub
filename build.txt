@@ -1,7 +1,7 @@
-built_at=2026-05-28T13:33:59Z
+built_at=2026-05-28T13:35:05Z
 source_repo=/home/sebastian/repos/grain
 source_commit=7dc404e15ff5025af56b1bfe7b249b6516e91bb4
 deploy_repo=/home/sebastian/repos/grain-pub
-deploy_commit_before=4327603a9df6e59d07a53d53d8526a4d10e42c0b
-bundle_js=assets/index-CJfw3izD.js
+deploy_commit_before=b5927a603b216a0a8995e127b5b99afec4494620
+bundle_js=assets/index-Sp_mLNDU.js
 bundle_css=assets/index-DLVklyAa.css
