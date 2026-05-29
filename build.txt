@@ -1,5 +1,0 @@
-built_at=2026-05-29T21:53:23Z
-source_repo=/home/user/grain
-source_commit=5ee8c72c4a5fd88ca07f2641bf4025ba34dfad85
-bundle_js=assets/index-C7TNmeh1.js
-bundle_css=assets/index-Dwr3XQZ5.css
