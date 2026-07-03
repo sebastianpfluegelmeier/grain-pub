@@ -9,14 +9,18 @@ const SYNC_STATE_KEY = "grain.assets.sync.state";
 const DEFAULT_TILE_SIZE = 16;
 const MIN_TILE_SIZE = 4;
 const MAX_TILE_SIZE = 32;
+const MAX_CUBE_SIZE = 1024;
 const DEFAULT_FPS = 8;
 const MIN_FPS = 1;
 const MAX_FPS = 24;
 const STARTER_FRAME_COUNT = 4;
 const BASE_TILE_RENDER_SIZE = 384;
-const MIN_TILE_RENDER_SCALE = 12;
 const CHECKER_DISPLAY_SIZE = 10;
 const MAX_CANVAS_CELL_SIZE = 40;
+const ZOOM_LEVELS = [1, 2, 4, 8, 16];
+const MIN_BRUSH_SIZE = 1;
+const MAX_BRUSH_SIZE = 64;
+const MAX_Z_BRUSH_RADIUS = 16;
 const HISTORY_LIMIT = 100;
 const Pixel = {
   Transparent: 0,
@@ -36,8 +40,9 @@ const BINARY_KIND_ASSET = Object.fromEntries(Object.entries(BINARY_ASSET_KIND).m
 const BINARY_ASSET_VISIBLE = 0x01;
 const GRAY_BASE = 10;
 const WRAP_MARGIN_RATIO = 0.25;
-const PEN_TOOLS = ["pen", "dither", "spray", "mirror"];
-const DRAG_TOOLS = ["line", "square", "shift"];
+const MAX_WRAP_MARGIN = 32;
+const PEN_TOOLS = ["pen", "dither", "spray", "noise", "blur", "displace"];
+const DRAG_TOOLS = ["line", "square", "gradient", "shift"];
 const BAYER4 = [
   [0, 8, 2, 10],
   [12, 4, 14, 6],
@@ -58,6 +63,7 @@ const ICONS = {
   pen: `<svg ${ICON_ATTRS}><path d="M11.2 2.7a1.3 1.3 0 0 1 1.85 0l.25.25a1.3 1.3 0 0 1 0 1.85L6.6 11.5 3 13l1.5-3.6 6.7-6.7z"/><path d="M10.1 3.8l2.1 2.1"/></svg>`,
   line: `<svg ${ICON_ATTRS}><path d="M3.2 12.8 12.8 3.2"/></svg>`,
   square: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>`,
+  circle: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="5.2"/></svg>`,
   plus: `<svg ${ICON_ATTRS}><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>`,
   minus: `<svg ${ICON_ATTRS}><path d="M3.2 8h9.6"/></svg>`,
   duplicate: `<svg ${ICON_ATTRS}><rect x="5.7" y="5.7" width="7.1" height="7.1" rx="1.4"/><path d="M10.3 3.2H4.9a1.7 1.7 0 0 0-1.7 1.7v5.4"/></svg>`,
@@ -68,12 +74,25 @@ const ICONS = {
   sync: `<svg ${ICON_ATTRS}><path d="M13 8a5 5 0 0 1-8.7 3.4M3 8a5 5 0 0 1 8.7-3.4"/><path d="M11.4 1.8l.3 2.8-2.8.3M4.6 14.2l-.3-2.8 2.8-.3"/></svg>`,
   dither: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="2.4" height="2.4"/><rect x="7.8" y="3" width="2.4" height="2.4"/><rect x="5.4" y="5.4" width="2.4" height="2.4"/><rect x="10.2" y="5.4" width="2.4" height="2.4"/><rect x="3" y="7.8" width="2.4" height="2.4"/><rect x="7.8" y="7.8" width="2.4" height="2.4"/><rect x="5.4" y="10.2" width="2.4" height="2.4"/><rect x="10.2" y="10.2" width="2.4" height="2.4"/></svg>`,
   spray: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="1.4"/><circle cx="4" cy="5" r="1"/><circle cx="12" cy="4.5" r="1"/><circle cx="11.5" cy="11.5" r="1"/><circle cx="4.5" cy="11" r="1"/><circle cx="8" cy="3" r="0.8"/><circle cx="13" cy="8" r="0.8"/><circle cx="3" cy="8" r="0.8"/><circle cx="8" cy="13" r="0.8"/></svg>`,
-  mirror: `<svg ${ICON_ATTRS}><path d="M8 2.5v11" stroke-dasharray="1.6 1.8"/><path d="M5.5 5 2.8 8l2.7 3z" fill="currentColor" stroke="none"/><path d="M10.5 5l2.7 3-2.7 3z"/></svg>`,
+  noise: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="2" height="2"/><rect x="8" y="2" width="1.6" height="1.6"/><rect x="12" y="4" width="1.7" height="1.7"/><rect x="5.8" y="6.2" width="2.4" height="2.4"/><rect x="10.5" y="8" width="1.6" height="1.6"/><rect x="2.8" y="10.2" width="2.2" height="2.2"/><rect x="7.5" y="11.5" width="2" height="2"/><rect x="12" y="12" width="1.8" height="1.8"/></svg>`,
+  blur: `<svg ${ICON_ATTRS}><circle cx="6.2" cy="6.1" r="2.7"/><circle cx="9.8" cy="9.8" r="2.7"/><path d="M3 12.8h10" stroke-dasharray="1.6 2"/></svg>`,
+  displace: `<svg ${ICON_ATTRS}><path d="M3 9.5c2.2-3 4.7 3 7 0 1-.9 1.5-2.1 1.5-3.5"/><path d="M9.3 4.2 11.5 6 9.7 8.2"/><path d="M4.5 12.8h7"/></svg>`,
+  gradient: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="3.4" height="10" fill="currentColor"/><rect x="6.3" y="3" width="3.4" height="10" fill="currentColor" opacity="0.55"/><rect x="9.6" y="3" width="3.4" height="10" fill="currentColor" opacity="0.18"/><rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`,
   fill: `<svg ${ICON_ATTRS}><path d="M7.5 2.2 12.6 7.3 8 11.9a1.4 1.4 0 0 1-2 0L3.6 9.5a1.4 1.4 0 0 1 0-2z"/><path d="M13.4 10.6s1.2 1.5 1.2 2.4a1.2 1.2 0 0 1-2.4 0c0-.9 1.2-2.4 1.2-2.4z" fill="currentColor" stroke="none"/></svg>`,
   shift: `<svg ${ICON_ATTRS}><path d="M8 2.5v11M2.5 8h11"/><path d="M6.3 4.2 8 2.5l1.7 1.7M6.3 11.8 8 13.5l1.7-1.7M4.2 6.3 2.5 8l1.7 1.7M11.8 6.3 13.5 8l-1.7 1.7"/></svg>`,
   onion: `<svg ${ICON_ATTRS}><rect x="2.5" y="2.5" width="8" height="8"/><rect x="5.5" y="5.5" width="8" height="8" stroke-dasharray="1.6 1.8"/></svg>`,
   tween: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3.4" cy="8" r="1.7" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.7" fill="currentColor" fill-opacity="0.45" stroke="none"/><circle cx="12.6" cy="8" r="1.7"/></svg>`,
   stack: `<svg ${ICON_ATTRS}><path d="M8 2.2 14 5.2 8 8.2 2 5.2z"/><path d="M2 8.2l6 3 6-3M2 11.2l6 3 6-3"/></svg>`,
+  target: `<svg ${ICON_ATTRS}><circle cx="8" cy="8" r="4.8"/><circle cx="8" cy="8" r="1.6"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2"/></svg>`,
+  visible: `<svg ${ICON_ATTRS}><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8s-2.3 4.2-6.2 4.2S1.8 8 1.8 8z"/><path d="M5.6 8h4.8"/></svg>`,
+  zframe: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3h10L5.8 13H13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter"/></svg>`,
+  zsoft: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3h10L5.8 13H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/><path d="M4.2 12.4h7.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="square" stroke-dasharray="1.4 1.5" opacity=".55"/></svg>`,
+  fixed: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8"/></svg>`,
+  random: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="4" cy="5" r="1.3"/><circle cx="11" cy="4" r="1"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="12" cy="11" r="1.2"/><circle cx="4.8" cy="12" r="0.9"/></svg>`,
+  radialOut: `<svg ${ICON_ATTRS}><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>`,
+  radialIn: `<svg ${ICON_ATTRS}><circle cx="8" cy="8" r="5.2" fill="currentColor" fill-opacity="0.18"/><circle cx="8" cy="8" r="2.3"/></svg>`,
+  single: `<svg ${ICON_ATTRS}><path d="M8 3v10"/><path d="M5.5 5.5h5M5.5 10.5h5"/></svg>`,
+  range: `<svg ${ICON_ATTRS}><path d="M4.7 3v10M11.3 3v10"/><path d="M4.7 8h6.6"/></svg>`,
   select: `<svg ${ICON_ATTRS}><rect x="3" y="3" width="10" height="10" stroke-dasharray="2.4 2"/></svg>`,
   flipH: `<svg ${ICON_ATTRS}><path d="M8 2.5v11" stroke-dasharray="1.6 1.8"/><path d="M6 5.5 3 8l3 2.5zM10 5.5 13 8l-3 2.5z"/></svg>`,
   flipV: `<svg ${ICON_ATTRS}><path d="M2.5 8h11" stroke-dasharray="1.6 1.8"/><path d="M5.5 6 8 3l2.5 3zM5.5 10 8 13l2.5-3z"/></svg>`,
@@ -102,6 +121,7 @@ const state = {
   syncBusy: false,
   syncMessage: "",
   allFrames: false,
+  paintScope: "active",
   onion: false,
   flash: "",
   selection: null, // {x, y, w, h} in cell coords on the active grid
@@ -109,10 +129,25 @@ const state = {
   moveOffset: null, // {dx, dy} while dragging a selection
   clipboard: null, // {w, h, cells}
   eraseStroke: false,
+  lastPaintCell: null,
+  strokePath: [],
+  strokeBase: null,
+  brushSize: 1,
+  brushShape: "square",
+  zBrushRadius: 1,
+  grayMin: 0,
+  grayMax: 255,
+  grayScale: "range",
+  grayMode: "fixed",
+  opacityMin: 100,
+  opacityMax: 100,
+  opacityScale: "range",
+  opacityMode: "fixed",
   ditherLevel: 8, // Bayer threshold out of 16 (4 = 25%, 8 = 50%, 12 = 75%)
   history: { past: [], future: [] },
   playing: false,
   playTimer: null,
+  zoom: 1,
 };
 
 const app = document.querySelector("#app");
@@ -354,8 +389,9 @@ function normalizeAsset(asset) {
 }
 
 function normalizeFramed(asset) {
-  const width = clampInt(asset.width || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, MAX_TILE_SIZE);
-  const height = clampInt(asset.height || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, MAX_TILE_SIZE);
+  const maxSize = maxSizeForType(asset.type);
+  const width = clampInt(asset.width || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
+  const height = clampInt(asset.height || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
   const source = Array.isArray(asset.frames) ? asset.frames : [];
   const allowGray = asset.type === "cube";
   const frames = source.map((frame) => normalizeGrid(frame, width, height, allowGray));
@@ -582,8 +618,8 @@ function wraps(asset) {
 function wrapMarginOf(asset) {
   if (!wraps(asset)) return { x: 0, y: 0 };
   return {
-    x: Math.max(1, Math.round(widthOf(asset) * WRAP_MARGIN_RATIO)),
-    y: Math.max(1, Math.round(heightOf(asset) * WRAP_MARGIN_RATIO)),
+    x: Math.min(MAX_WRAP_MARGIN, Math.max(1, Math.round(widthOf(asset) * WRAP_MARGIN_RATIO))),
+    y: Math.min(MAX_WRAP_MARGIN, Math.max(1, Math.round(heightOf(asset) * WRAP_MARGIN_RATIO))),
   };
 }
 
@@ -604,7 +640,26 @@ function activeCells() {
 /* ---------- Actions ---------- */
 
 function dispatch(action) {
-  const keepsPlayback = ["togglePlay", "setFps", "setTool", "setColor", "commitShape", "toggleOnion", "toggleAllFrames"];
+  const keepsPlayback = [
+    "togglePlay",
+    "setFps",
+    "setTool",
+    "setColor",
+    "setBrushSize",
+    "setBrushShape",
+    "setPaintScope",
+    "setZBrushRadius",
+    "setGrayRange",
+    "setGrayScale",
+    "setGrayMode",
+    "setOpacityRange",
+    "setOpacityScale",
+    "setOpacityMode",
+    "commitShape",
+    "toggleOnion",
+    "toggleAllFrames",
+    "setZoom",
+  ];
   if (state.playing && !keepsPlayback.includes(action.type)) {
     stopPlayback();
   }
@@ -613,6 +668,7 @@ function dispatch(action) {
       state.screen = "gallery";
       state.activeAssetId = null;
       state.status = "Local only";
+      state.zoom = 1;
       resetHistory();
       break;
     case "createAsset": {
@@ -633,6 +689,7 @@ function dispatch(action) {
       state.status = `Created ${name}`;
       state.color = Pixel.Black;
       state.selection = null;
+      state.zoom = 1;
       resetHistory();
       saveAssets();
       break;
@@ -663,6 +720,7 @@ function dispatch(action) {
       state.status = "Editing";
       state.color = Pixel.Black;
       state.selection = null;
+      state.zoom = 1;
       resetHistory();
       break;
     case "renameAsset": {
@@ -678,8 +736,14 @@ function dispatch(action) {
       if (asset) {
         resizeAsset(asset, action.width, action.height);
         state.selection = null;
+        if (!canZoomAsset(asset)) state.zoom = 1;
         state.status = `${widthOf(asset)}x${heightOf(asset)}`;
       }
+      break;
+    }
+    case "setZoom": {
+      const asset = activeAsset();
+      state.zoom = asset && canZoomAsset(asset) ? clampZoom(action.zoom) : 1;
       break;
     }
     case "setFps": {
@@ -754,6 +818,50 @@ function dispatch(action) {
     case "setColor":
       state.color = action.color;
       break;
+    case "setBrushSize":
+      state.brushSize = clampBrushSize(action.size);
+      break;
+    case "setBrushShape":
+      state.brushShape = action.shape === "round" ? "round" : "square";
+      break;
+    case "setPaintScope":
+      state.paintScope = validPaintScope(action.scope);
+      state.allFrames = state.paintScope === "all";
+      break;
+    case "setZBrushRadius":
+      state.zBrushRadius = clampInt(action.radius, 0, MAX_Z_BRUSH_RADIUS);
+      break;
+    case "setGrayRange": {
+      const nextMin = clampInt(action.min ?? state.grayMin, 0, 255);
+      const nextMax = clampInt(action.max ?? state.grayMax, 0, 255);
+      state.grayMin = Math.min(nextMin, nextMax);
+      state.grayMax = Math.max(nextMin, nextMax);
+      state.color = grayPixel(state.grayMin);
+      break;
+    }
+    case "setGrayScale":
+      state.grayScale = validScaleMode(action.scale);
+      if (state.grayScale === "single") state.grayMax = state.grayMin;
+      state.color = grayPixel(state.grayMin);
+      break;
+    case "setGrayMode":
+      state.grayMode = validGrayMode(action.mode);
+      state.color = grayPixel(state.grayMin);
+      break;
+    case "setOpacityRange": {
+      const nextMin = clampInt(action.min ?? state.opacityMin, 0, 100);
+      const nextMax = clampInt(action.max ?? state.opacityMax, 0, 100);
+      state.opacityMin = Math.min(nextMin, nextMax);
+      state.opacityMax = Math.max(nextMin, nextMax);
+      break;
+    }
+    case "setOpacityScale":
+      state.opacityScale = validScaleMode(action.scale);
+      if (state.opacityScale === "single") state.opacityMax = state.opacityMin;
+      break;
+    case "setOpacityMode":
+      state.opacityMode = validRangeMode(action.mode);
+      break;
     case "selectTile": {
       const asset = activeAsset();
       state.activeTile = action.index;
@@ -816,7 +924,8 @@ function dispatch(action) {
       commitShape(action);
       break;
     case "toggleAllFrames":
-      state.allFrames = !state.allFrames;
+      state.paintScope = state.paintScope === "all" ? "active" : "all";
+      state.allFrames = state.paintScope === "all";
       break;
     case "toggleOnion":
       state.onion = !state.onion;
@@ -969,8 +1078,9 @@ function playbackTick() {
 /* ---------- Resizing ---------- */
 
 function resizeAsset(asset, requestedWidth, requestedHeight) {
-  const nextWidth = clampInt(requestedWidth, MIN_TILE_SIZE, MAX_TILE_SIZE);
-  const nextHeight = clampInt(requestedHeight, MIN_TILE_SIZE, MAX_TILE_SIZE);
+  const maxSize = maxSizeForAsset(asset);
+  const nextWidth = clampInt(requestedWidth, MIN_TILE_SIZE, maxSize);
+  const nextHeight = clampInt(requestedHeight, MIN_TILE_SIZE, maxSize);
   const oldWidth = widthOf(asset);
   const oldHeight = heightOf(asset);
   if (nextWidth === oldWidth && nextHeight === oldHeight) return;
@@ -1438,13 +1548,15 @@ function editorScreen() {
         dispatch({ type: "resizeAsset", width: value, height: value })),
     );
   } else {
+    const maxSize = maxSizeForAsset(asset);
     sizeGroup.append(
-      stepperControl("W", asset.width, MIN_TILE_SIZE, MAX_TILE_SIZE, "Width", (value) =>
+      stepperControl("W", asset.width, MIN_TILE_SIZE, maxSize, "Width", (value) =>
         dispatch({ type: "resizeAsset", width: value, height: asset.height })),
-      stepperControl("H", asset.height, MIN_TILE_SIZE, MAX_TILE_SIZE, "Height", (value) =>
+      stepperControl("H", asset.height, MIN_TILE_SIZE, maxSize, "Height", (value) =>
         dispatch({ type: "resizeAsset", width: asset.width, height: value })),
     );
   }
+  if (canZoomAsset(asset)) sizeGroup.append(zoomControl(asset));
   sizeGroup.append(iconTextButton("Export", "download", "btn", () => exportActiveAsset()));
   head.append(rename, sizeGroup);
   wrap.append(head);
@@ -1463,7 +1575,7 @@ function editorScreen() {
 
   const dock = document.createElement("div");
   dock.className = "dock";
-  dock.append(toolRow(asset), colorRow(asset), frameActions(asset), tileActions(asset), tileRow(asset));
+  dock.append(toolRow(asset), colorRow(asset), brushRow(asset), frameActions(asset), tileActions(asset), tileRow(asset));
   wrap.append(dock);
   return wrap;
 }
@@ -1492,35 +1604,361 @@ function stepperControl(label, value, min, max, description, apply) {
   return control;
 }
 
+function zoomControl(asset) {
+  const zoom = zoomFactorForAsset(asset);
+  const control = document.createElement("div");
+  control.className = "size-control zoom-control";
+  control.innerHTML = "<span>Zoom</span>";
+  const stepper = document.createElement("div");
+  stepper.className = "stepper small";
+  const zoomIndex = ZOOM_LEVELS.indexOf(zoom);
+  const out = document.createElement("span");
+  out.className = "step-value zoom-value";
+  out.textContent = `${zoom}x`;
+  const zoomOut = iconButton("Zoom out", "minus", "step-btn", () =>
+    dispatch({ type: "setZoom", zoom: ZOOM_LEVELS[Math.max(0, zoomIndex - 1)] }));
+  const zoomIn = iconButton("Zoom in", "plus", "step-btn", () =>
+    dispatch({ type: "setZoom", zoom: ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, zoomIndex + 1)] }));
+  zoomOut.disabled = zoomIndex <= 0;
+  zoomIn.disabled = zoomIndex >= ZOOM_LEVELS.length - 1;
+  stepper.append(zoomOut, out, zoomIn);
+  control.append(stepper);
+  return control;
+}
+
 function toolRow(asset) {
   const row = document.createElement("div");
   row.className = "tool-row";
-  const tools = [
-    ["Pen", "pen"],
-    [`Dither pen (${Math.round((state.ditherLevel / 16) * 100)}% — click again to cycle)`, "dither"],
-    ["Noise spray", "spray"],
-    ["Mirror pen", "mirror"],
-    ["Line", "line"],
-    ["Filled square", "square"],
-    ["Fill bucket", "fill"],
-    ["Shift (drag to offset)", "shift"],
-    ["Select (drag; move inside; copy/cut/paste with keyboard)", "select"],
+  const toolGroups = [
+    [
+      ["Pen", "pen"],
+      [`Dither pen (${Math.round((state.ditherLevel / 16) * 100)}% — click again to cycle)`, "dither"],
+      ["Spray", "spray"],
+      ["Noise brush", "noise"],
+      ["Blur / smudge", "blur"],
+      ["Soft displace", "displace"],
+    ],
+    [
+      ["Line", "line"],
+      ["Filled square", "square"],
+      ["Gradient", "gradient"],
+      ["Fill bucket", "fill"],
+    ],
+    [
+      ["Shift (drag to offset)", "shift"],
+      ["Select (drag; move inside; copy/cut/paste with keyboard)", "select"],
+    ],
   ];
-  for (const [label, tool] of tools) {
-    row.append(toggleButton(label, tool, state.tool === tool, () => dispatch({ type: "setTool", tool })));
+  toolGroups.forEach((tools, groupIndex) => {
+    if (groupIndex) row.append(toolbarDivider());
+    for (const [label, tool] of tools) {
+      row.append(toggleButton(label, tool, state.tool === tool, () => dispatch({ type: "setTool", tool })));
+    }
+  });
+  return row;
+}
+
+function toolbarDivider() {
+  const divider = document.createElement("span");
+  divider.className = "action-divider";
+  return divider;
+}
+
+function brushRow(asset) {
+  const row = document.createElement("div");
+  row.className = "brush-row";
+  row.append(
+    controlCluster("Brush", brushSizeControl()),
+    controlCluster("Scope", paintScopeButtons(asset)),
+  );
+  if (["z", "zsoft"].includes(paintScopeFor(asset)) && hasPlayback(asset)) {
+    row.append(controlCluster("Z", zBrushControl(asset)));
   }
-  if (hasPlayback(asset)) {
-    const divider = document.createElement("span");
-    divider.className = "action-divider";
-    const allFrames = iconButton(
-      state.allFrames ? "Drawing on all frames (click for single)" : "Draw on all frames",
-      "stack",
-      `tool-btn${state.allFrames ? " active" : ""}`,
-      () => dispatch({ type: "toggleAllFrames" }),
-    );
-    row.append(divider, allFrames);
+  if (asset.type === "cube") {
+    row.append(controlCluster("Gray", grayRangeControl()));
+    row.append(controlCluster("Alpha", opacityRangeControl()));
   }
   return row;
+}
+
+function controlCluster(label, content) {
+  const wrap = document.createElement("div");
+  wrap.className = "control-cluster";
+  const title = document.createElement("span");
+  title.className = "cluster-label";
+  title.textContent = label;
+  const body = document.createElement("div");
+  body.className = "cluster-body";
+  body.append(content);
+  wrap.append(title, body);
+  return wrap;
+}
+
+function brushSizeControl() {
+  const control = document.createElement("div");
+  control.className = "brush-size-control";
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.className = "brush-size-slider";
+  slider.min = String(MIN_BRUSH_SIZE);
+  slider.max = String(MAX_BRUSH_SIZE);
+  slider.step = "1";
+  slider.value = String(state.brushSize);
+  slider.ariaLabel = "Brush size";
+  const value = document.createElement("span");
+  value.className = "brush-size-value";
+  value.textContent = String(state.brushSize);
+  slider.addEventListener("input", () => {
+    const size = clampBrushSize(slider.value);
+    state.brushSize = size;
+    value.textContent = String(size);
+  });
+  slider.addEventListener("change", () => dispatch({ type: "setBrushSize", size: slider.value }));
+  const shape = document.createElement("div");
+  shape.className = "segmented icon-segmented brush-shape";
+  for (const [label, iconName, brushShape] of [
+    ["Square brush", "square", "square"],
+    ["Round brush", "circle", "round"],
+  ]) {
+    shape.append(iconButton(label, iconName, `segment-btn icon-segment${state.brushShape === brushShape ? " active" : ""}`, () =>
+      dispatch({ type: "setBrushShape", shape: brushShape })));
+  }
+  control.append(slider, value, shape);
+  return control;
+}
+
+function paintScopeButtons(asset) {
+  const group = document.createElement("div");
+  group.className = "segmented icon-segmented";
+  const current = paintScopeFor(asset);
+  const scopes = [
+    ["Active target", "target", "active", false],
+    ["Visible layers", "visible", "visible", asset.type !== "blockset"],
+    ["All targets", "stack", "all", false],
+    ["Z frame brush", "zframe", "z", !hasPlayback(asset)],
+    ["Z falloff brush", "zsoft", "zsoft", !hasPlayback(asset)],
+  ];
+  for (const [label, iconName, scope, disabled] of scopes) {
+    const btn = iconButton(label, iconName, `segment-btn icon-segment${current === scope ? " active" : ""}`, () =>
+      dispatch({ type: "setPaintScope", scope }));
+    btn.disabled = disabled;
+    group.append(btn);
+  }
+  return group;
+}
+
+function zBrushControl(asset) {
+  const frames = cellsOf(asset).length;
+  const max = Math.min(MAX_Z_BRUSH_RADIUS, Math.max(0, frames - 1));
+  const radius = clampInt(state.zBrushRadius, 0, max);
+  const stepper = document.createElement("div");
+  stepper.className = "stepper small flat-stepper";
+  const out = document.createElement("span");
+  out.className = "step-value zoom-value";
+  out.textContent = String(radius);
+  const down = iconButton("Smaller z brush", "minus", "step-btn", () =>
+    dispatch({ type: "setZBrushRadius", radius: radius - 1 }));
+  const up = iconButton("Larger z brush", "plus", "step-btn", () =>
+    dispatch({ type: "setZBrushRadius", radius: radius + 1 }));
+  down.disabled = radius <= 0;
+  up.disabled = radius >= max;
+  stepper.append(down, out, up);
+  return stepper;
+}
+
+function grayRangeControl() {
+  return scaleRangeControl({
+    kind: "gray",
+    label: "gray",
+    scale: state.grayScale,
+    minValue: state.grayMin,
+    maxValue: state.grayMax,
+    max: 255,
+    mode: state.grayMode,
+    setRangeType: "setGrayRange",
+    setScaleType: "setGrayScale",
+    setModeType: "setGrayMode",
+    onUpdate: (value) => {
+      state.color = grayPixel(value);
+      const chip = document.querySelector(".gray-chip");
+      if (chip) chip.style.background = cssForPixel(grayPixel(value));
+    },
+  });
+}
+
+function opacityRangeControl() {
+  return scaleRangeControl({
+    kind: "opacity",
+    label: "opacity",
+    scale: state.opacityScale,
+    minValue: state.opacityMin,
+    maxValue: state.opacityMax,
+    max: 100,
+    mode: state.opacityMode,
+    setRangeType: "setOpacityRange",
+    setScaleType: "setOpacityScale",
+    setModeType: "setOpacityMode",
+  });
+}
+
+function scaleRangeControl(config) {
+  const wrap = document.createElement("div");
+  wrap.className = `gray-range-control ${config.kind}-range-control`;
+  let currentMin = clampInt(config.minValue, 0, config.max);
+  let currentMax = config.scale === "single" ? currentMin : clampInt(config.maxValue, 0, config.max);
+  const values = document.createElement("div");
+  values.className = `gray-range-values${config.scale === "single" ? " single" : ""}`;
+  const min = grayRangeNumber(config.scale === "single" ? capitalize(config.label) : `Minimum ${config.label}`, currentMin, config.max);
+  const slider = config.scale === "single"
+    ? singleRangeSlider(config.kind, currentMin, config.max, config.label)
+    : dualRangeSlider(config.kind, currentMin, currentMax, config.max, config.label);
+  const updateCss = (low, high) => {
+    const lowPercent = config.max > 0 ? (low / config.max) * 100 : 0;
+    const highPercent = config.max > 0 ? (high / config.max) * 100 : 0;
+    slider.wrap.style.setProperty("--range-min", `${lowPercent}%`);
+    slider.wrap.style.setProperty("--range-max", `${highPercent}%`);
+    slider.wrap.style.setProperty("--range-min-split", `${Math.min(100, lowPercent * 2)}%`);
+    slider.wrap.style.setProperty("--range-max-split", `${Math.max(0, (highPercent - 50) * 2)}%`);
+  };
+  const update = (nextMin, nextMax = nextMin) => {
+    const low = config.scale === "single"
+      ? clampInt(nextMin, 0, config.max)
+      : Math.min(clampInt(nextMin, 0, config.max), clampInt(nextMax, 0, config.max));
+    const high = config.scale === "single"
+      ? low
+      : Math.max(clampInt(nextMin, 0, config.max), clampInt(nextMax, 0, config.max));
+    currentMin = low;
+    currentMax = high;
+    if (config.kind === "gray") {
+      state.grayMin = low;
+      state.grayMax = high;
+    } else if (config.kind === "opacity") {
+      state.opacityMin = low;
+      state.opacityMax = high;
+    }
+    min.value = String(low);
+    slider.min.value = String(low);
+    if (slider.max) slider.max.value = String(high);
+    updateCss(config.scale === "single" ? 0 : low, high);
+    config.onUpdate?.(low, high);
+  };
+  const commit = () => {
+    if (config.scale === "single") update(clampInt(min.value, 0, config.max));
+    else update(clampInt(min.value, 0, config.max), clampInt(max.value, 0, config.max));
+    dispatch({ type: config.setRangeType, min: currentMin, max: currentMax });
+  };
+  min.addEventListener("change", commit);
+  slider.min.addEventListener("input", () => update(clampInt(slider.min.value, 0, config.max), currentMax));
+  slider.min.addEventListener("change", commit);
+  values.append(min, slider.wrap);
+  let max = null;
+  if (config.scale === "range") {
+    max = grayRangeNumber(`Maximum ${config.label}`, currentMax, config.max);
+    max.addEventListener("change", commit);
+    slider.max.addEventListener("input", () => update(currentMin, clampInt(slider.max.value, 0, config.max)));
+    slider.max.addEventListener("change", commit);
+    values.append(max);
+  }
+  update(currentMin, currentMax);
+  wrap.append(values, scaleToggle(config));
+  if (config.scale === "range") {
+    const modes = document.createElement("div");
+    modes.className = `segmented icon-segmented gray-mode ${config.kind}-mode`;
+    for (const [label, iconName, mode] of rangeModeOptions(config.label)) {
+      modes.append(iconButton(label, iconName, `segment-btn icon-segment${config.mode === mode ? " active" : ""}`, () =>
+        dispatch({ type: config.setModeType, mode })));
+    }
+    wrap.append(modes);
+  }
+  return wrap;
+}
+
+function scaleToggle(config) {
+  const group = document.createElement("div");
+  group.className = "segmented icon-segmented scale-toggle";
+  for (const [label, iconName, scale] of [
+    [`Single ${config.label} value`, "single", "single"],
+    [`${capitalize(config.label)} range`, "range", "range"],
+  ]) {
+    group.append(iconButton(label, iconName, `segment-btn icon-segment${config.scale === scale ? " active" : ""}`, () =>
+      dispatch({ type: config.setScaleType, scale })));
+  }
+  return group;
+}
+
+function rangeModeOptions(label) {
+  return [
+    [`Fixed ${label}`, "fixed", "fixed"],
+    [`Random ${label} in range`, "random", "random"],
+    [`${capitalize(label)} follows stroke`, "gradient", "gradient"],
+    [`${capitalize(label)} darker/softer inside`, "radialOut", "radialOut"],
+    [`${capitalize(label)} lighter/stronger inside`, "radialIn", "radialIn"],
+  ];
+}
+
+function grayRangeNumber(label, value, max = 255) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.className = "gray-number";
+  input.min = "0";
+  input.max = String(max);
+  input.step = "1";
+  input.value = String(value);
+  input.ariaLabel = label;
+  input.title = label;
+  return input;
+}
+
+function dualRangeSlider(kind, minValue, maxValue, max, label) {
+  const wrap = document.createElement("div");
+  wrap.className = `gray-dual-slider split-dual-slider ${kind}-dual-slider`;
+  wrap.style.setProperty("--range-min", `${(minValue / max) * 100}%`);
+  wrap.style.setProperty("--range-max", `${(maxValue / max) * 100}%`);
+  const minHalf = rangeSliderHalf("min");
+  const maxHalf = rangeSliderHalf("max");
+  const min = rangeInput(`Minimum ${label} slider`, "min", minValue, max);
+  const maxInput = rangeInput(`Maximum ${label} slider`, "max", maxValue, max);
+  minHalf.append(min);
+  maxHalf.append(maxInput);
+  wrap.append(minHalf, maxHalf);
+  return { wrap, min, max: maxInput };
+}
+
+function singleRangeSlider(kind, value, max, label) {
+  const wrap = document.createElement("div");
+  wrap.className = `gray-dual-slider single-slider ${kind}-dual-slider`;
+  wrap.style.setProperty("--range-min", "0%");
+  wrap.style.setProperty("--range-max", `${(value / max) * 100}%`);
+  const track = document.createElement("span");
+  track.className = "gray-slider-track";
+  const fill = document.createElement("span");
+  fill.className = "gray-slider-fill";
+  const min = rangeInput(`${capitalize(label)} slider`, "single", value, max);
+  wrap.append(track, fill, min);
+  return { wrap, min };
+}
+
+function rangeSliderHalf(kind) {
+  const half = document.createElement("div");
+  half.className = `slider-half slider-half-${kind}`;
+  const track = document.createElement("span");
+  track.className = "gray-slider-track";
+  const fill = document.createElement("span");
+  fill.className = "gray-slider-fill";
+  half.append(track, fill);
+  return half;
+}
+
+function rangeInput(label, handle, value, max) {
+  const input = document.createElement("input");
+  input.type = "range";
+  input.className = `gray-range-slider ${handle}`;
+  input.min = "0";
+  input.max = String(max);
+  input.step = "1";
+  input.value = String(value);
+  input.ariaLabel = label;
+  return input;
 }
 
 function frameActions(asset) {
@@ -1584,25 +2022,13 @@ function colorRow(asset) {
   const row = document.createElement("div");
   row.className = "color-row";
   if (asset.type === "cube") {
-    const chip = document.createElement("span");
-    chip.className = "gray-chip";
-    chip.title = "Current gray";
-    const paintColor = state.color === Pixel.Transparent ? grayPixel(0) : state.color;
+    const chip = button("", `gray-chip gray-chip-btn${state.color !== Pixel.Transparent ? " active" : ""}`, () =>
+      dispatch({ type: "setColor", color: grayPixel(state.grayMin) }));
+    chip.title = "Gray paint";
+    chip.ariaLabel = "Gray paint";
+    const paintColor = state.color === Pixel.Transparent ? grayPixel(state.grayMin) : state.color;
     chip.style.background = cssForPixel(paintColor);
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.className = "gray-slider";
-    slider.min = "0";
-    slider.max = "255";
-    slider.step = "1";
-    slider.value = String(grayLevelOf(paintColor));
-    slider.ariaLabel = "Gray level";
-    slider.addEventListener("input", () => {
-      state.color = grayPixel(clampInt(slider.value, 0, 255));
-      chip.style.background = cssForPixel(state.color);
-      row.querySelector(".color-btn.active")?.classList.remove("active");
-    });
-    row.append(chip, slider, colorButton("Transparent", "clear", Pixel.Transparent));
+    row.append(chip, colorButton("Transparent", "clear", Pixel.Transparent));
   } else {
     row.append(
       colorButton("Black", "black", Pixel.Black),
@@ -1729,6 +2155,9 @@ function onCanvasPointerDown(event) {
   if (state.tool === "fill") {
     fillAt(cell.x, cell.y);
     state.eraseStroke = false;
+    state.lastPaintCell = null;
+    state.strokePath = [];
+    state.strokeBase = null;
     render();
     return;
   }
@@ -1750,9 +2179,19 @@ function onCanvasPointerDown(event) {
   state.dragStart = cell;
   if (PEN_TOOLS.includes(state.tool)) {
     pushHistory();
-    paintAt(cell.x, cell.y);
+    if (usesStrokeGradient(asset)) {
+      beginGradientStroke(asset, cell);
+    } else {
+      paintAt(cell.x, cell.y);
+      state.strokePath = [];
+      state.strokeBase = null;
+    }
+    state.lastPaintCell = cell;
     drawCanvases();
   } else {
+    state.lastPaintCell = null;
+    state.strokePath = [];
+    state.strokeBase = null;
     drawCanvases(cell);
   }
 }
@@ -1772,7 +2211,9 @@ function onCanvasPointerMove(event) {
     return;
   }
   if (PEN_TOOLS.includes(state.tool)) {
-    paintAt(cell.x, cell.y);
+    if (state.strokeBase) extendGradientStroke(cell);
+    else paintStrokeBetween(state.lastPaintCell || cell, cell);
+    state.lastPaintCell = cell;
     drawCanvases();
   } else {
     drawCanvases(cell);
@@ -1789,6 +2230,23 @@ function onCanvasPointerUp(event) {
     state.moveOffset = null;
     state.dragStart = null;
     state.eraseStroke = false;
+    state.lastPaintCell = null;
+    state.strokePath = [];
+    state.strokeBase = null;
+    render();
+    return;
+  }
+  if (PEN_TOOLS.includes(state.tool)) {
+    if (state.strokeBase) {
+      extendGradientStroke(cell);
+    } else if (state.lastPaintCell && cell && (state.lastPaintCell.x !== cell.x || state.lastPaintCell.y !== cell.y)) {
+      paintStrokeBetween(state.lastPaintCell, cell);
+    }
+    state.dragStart = null;
+    state.eraseStroke = false;
+    state.lastPaintCell = null;
+    state.strokePath = [];
+    state.strokeBase = null;
     render();
     return;
   }
@@ -1797,11 +2255,17 @@ function onCanvasPointerUp(event) {
   } else {
     state.dragStart = null;
     state.eraseStroke = false;
+    state.lastPaintCell = null;
+    state.strokePath = [];
+    state.strokeBase = null;
     render();
     return;
   }
   state.dragStart = null;
   state.eraseStroke = false;
+  state.lastPaintCell = null;
+  state.strokePath = [];
+  state.strokeBase = null;
 }
 
 function cellFromEvent(event) {
@@ -1817,17 +2281,50 @@ function cellFromEvent(event) {
   return { x, y };
 }
 
-// Cell arrays a paint operation applies to: just the active tile/frame/layer,
-// or every frame when the all-frames toggle is on (animations and cubes).
-function targetCells(asset) {
-  if (state.allFrames && hasPlayback(asset)) return cellsOf(asset);
-  const active = cellsOf(asset)[state.activeTile];
-  return active ? [active] : [];
+function paintScopeFor(asset) {
+  const scope = validPaintScope(state.paintScope);
+  if (scope === "visible" && asset.type !== "blockset") return "active";
+  if ((scope === "z" || scope === "zsoft") && !hasPlayback(asset)) return "active";
+  if (state.allFrames && hasPlayback(asset)) return "all";
+  return scope;
 }
 
-// Color for the current stroke: right-button strokes erase.
-function strokeColor() {
-  return state.eraseStroke ? Pixel.Transparent : state.color;
+// Targets for paint operations. Soft Z targets carry a weight so strokes can
+// fade into neighboring frames without changing the rest of the pipeline.
+function targetPaintTargets(asset) {
+  const layers = cellsOf(asset);
+  const activeIndex = Math.max(0, Math.min(state.activeTile, layers.length - 1));
+  const active = layers[activeIndex];
+  if (!active) return [];
+  const scope = paintScopeFor(asset);
+  if (scope === "all") {
+    return layers.map((cells, index) => ({ cells, index, weight: 1 }));
+  }
+  if (scope === "visible") {
+    return layers
+      .map((cells, index) => ({ cells, index, weight: 1 }))
+      .filter((target) => layerVisible(asset, target.index));
+  }
+  if (scope === "z" || scope === "zsoft") {
+    const radius = clampInt(state.zBrushRadius, 0, Math.min(MAX_Z_BRUSH_RADIUS, layers.length - 1));
+    const targets = new Map();
+    for (let dz = -radius; dz <= radius; dz += 1) {
+      const index = (activeIndex + dz + layers.length) % layers.length;
+      const distance = Math.abs(dz);
+      const weight = scope === "zsoft" && radius > 0 ? 1 - distance / (radius + 1) : 1;
+      const current = targets.get(index);
+      if (!current || weight > current.weight) {
+        targets.set(index, { cells: layers[index], index, weight, soft: scope === "zsoft" });
+      }
+    }
+    return [...targets.values()].sort((a, b) => Math.abs(a.index - activeIndex) - Math.abs(b.index - activeIndex));
+  }
+  return [{ cells: active, index: activeIndex, weight: 1 }];
+}
+
+// Cell arrays a paint/transform operation applies to.
+function targetCells(asset) {
+  return targetPaintTargets(asset).map((target) => target.cells);
 }
 
 function paintAt(x, y) {
@@ -1835,42 +2332,391 @@ function paintAt(x, y) {
   if (!asset) return;
   const width = widthOf(asset);
   const height = heightOf(asset);
-  for (const cells of targetCells(asset)) {
-    penStamp(cells, width, height, x, y, wraps(asset), strokeColor());
+  paintPoint(asset, width, height, targetPaintTargets(asset), x, y, pointGradient(x, y));
+  touch(asset);
+}
+
+function paintStrokeBetween(from, to, gradient = null) {
+  const asset = activeAsset();
+  if (!asset || !from || !to) return;
+  const width = widthOf(asset);
+  const height = heightOf(asset);
+  const targets = targetPaintTargets(asset);
+  paintStrokeSegment(asset, width, height, targets, from, to, gradient || strokeGradient(from, to), motionVector(from, to));
+  touch(asset);
+}
+
+function paintStrokeSegment(asset, width, height, targets, from, to, gradient = null, motion = null) {
+  let x0 = from.x;
+  let y0 = from.y;
+  const x1 = to.x;
+  const y1 = to.y;
+  let dx = Math.abs(x1 - x0);
+  let sx = x0 < x1 ? 1 : -1;
+  let dy = -Math.abs(y1 - y0);
+  let sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  while (true) {
+    paintPoint(asset, width, height, targets, x0, y0, gradient, motion);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x0 += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y0 += sy;
+    }
+  }
+}
+
+function paintPoint(asset, width, height, targets, x, y, gradient = null, motion = null) {
+  for (const target of targets) {
+    penStamp(target.cells, width, height, x, y, asset, target, gradient, motion);
+  }
+}
+
+function usesStrokeGradient(asset) {
+  return (
+    asset?.type === "cube"
+    && usesGradientRangeMode()
+    && !state.eraseStroke
+    && state.color !== Pixel.Transparent
+    && ["pen", "dither", "spray", "noise"].includes(state.tool)
+  );
+}
+
+function beginGradientStroke(asset, cell) {
+  const targets = targetPaintTargets(asset);
+  state.strokeBase = {
+    assetId: asset.id,
+    targets: targets.map((target) => ({ index: target.index, cells: [...target.cells] })),
+  };
+  state.strokePath = [cell];
+  repaintGradientStroke(cell);
+}
+
+function extendGradientStroke(cell) {
+  const last = state.strokePath[state.strokePath.length - 1];
+  if (!last || last.x !== cell.x || last.y !== cell.y) state.strokePath.push(cell);
+  repaintGradientStroke(cell);
+}
+
+function repaintGradientStroke(end) {
+  const asset = activeAsset();
+  if (!asset || !state.strokeBase || state.strokeBase.assetId !== asset.id || !state.strokePath.length) return;
+  restoreStrokeBase(asset);
+  const width = widthOf(asset);
+  const height = heightOf(asset);
+  const targets = targetPaintTargets(asset);
+  const gradient = strokeGradient(state.strokePath[0], end);
+  if (state.strokePath.length === 1) {
+    paintPoint(asset, width, height, targets, end.x, end.y, gradient);
+  } else {
+    for (let i = 1; i < state.strokePath.length; i += 1) {
+      paintStrokeSegment(asset, width, height, targets, state.strokePath[i - 1], state.strokePath[i], gradient);
+    }
   }
   touch(asset);
 }
 
-function penStamp(cells, width, height, x, y, wrap, color) {
-  const put = (px, py, value) => {
-    if (!wrap && (px < 0 || py < 0 || px >= width || py >= height)) return;
-    cells[indexWrapped(px, py, width, height)] = value;
+function restoreStrokeBase(asset) {
+  const layers = cellsOf(asset);
+  for (const snapshot of state.strokeBase.targets) {
+    const target = layers[snapshot.index];
+    if (!target) continue;
+    for (let i = 0; i < target.length; i += 1) target[i] = snapshot.cells[i];
+  }
+}
+
+function strokeGradient(from, to) {
+  return usesGradientRangeMode() ? { from, to } : null;
+}
+
+function pointGradient(x, y) {
+  return usesGradientRangeMode()
+    ? { from: { x, y }, to: { x, y } }
+    : null;
+}
+
+function usesGradientRangeMode() {
+  return (
+    (state.grayScale === "range" && state.grayMode === "gradient")
+    || (state.opacityScale === "range" && state.opacityMode === "gradient")
+  );
+}
+
+function motionVector(from, to) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) return { dx: 0, dy: 0 };
+  return {
+    dx: dx / length,
+    dy: dy / length,
   };
-  const nx = ((x % width) + width) % width;
-  const ny = ((y % height) + height) % height;
+}
+
+function penStamp(cells, width, height, x, y, asset, target, gradient = null, motion = null) {
+  const wrap = wraps(asset);
   switch (state.tool) {
     case "pen":
-      put(x, y, color);
+      stampBrush(cells, width, height, x, y, wrap, asset, target, "solid", gradient);
       break;
     case "dither":
-      if (BAYER4[ny % 4][nx % 4] < state.ditherLevel) put(x, y, color);
+      stampBrush(cells, width, height, x, y, wrap, asset, target, "dither", gradient);
       break;
     case "spray":
-      for (let i = 0; i < 3; i += 1) {
-        if (Math.random() < 0.45) {
-          put(x + randomInt(-2, 2), y + randomInt(-2, 2), color);
-        }
-      }
+      sprayStamp(cells, width, height, x, y, wrap, asset, target, gradient);
       break;
-    case "mirror":
-      put(nx, ny, color);
-      put(width - 1 - nx, ny, color);
-      put(nx, height - 1 - ny, color);
-      put(width - 1 - nx, height - 1 - ny, color);
+    case "noise":
+      stampBrush(cells, width, height, x, y, wrap, asset, target, "noise", gradient);
+      break;
+    case "blur":
+      blurStamp(cells, width, height, x, y, wrap, asset, target);
+      break;
+    case "displace":
+      displaceStamp(cells, width, height, x, y, wrap, motion, target);
       break;
     default:
       break;
   }
+}
+
+function stampBrush(cells, width, height, x, y, wrap, asset, target, mode = "solid", gradient = null) {
+  forBrushCells(x, y, width, height, wrap, (px, py, index, brush) => {
+    if (mode === "dither" && BAYER4[((py % 4) + 4) % 4][((px % 4) + 4) % 4] >= state.ditherLevel) return;
+    const current = cells[index];
+    cells[index] = strokePixelForCell(asset, px, py, width, height, target, current, {
+      noise: mode === "noise",
+      gradient,
+      brush,
+    });
+  });
+}
+
+function sprayStamp(cells, width, height, x, y, wrap, asset, target, gradient = null) {
+  const radius = Math.max(2, state.brushSize * 2);
+  const count = Math.min(192, Math.max(8, state.brushSize * state.brushSize * 2));
+  for (let i = 0; i < count; i += 1) {
+    if (Math.random() > 0.58) continue;
+    const px = x + randomInt(-radius, radius);
+    const py = y + randomInt(-radius, radius);
+    putBrushPixel(cells, width, height, px, py, wrap, asset, target, "solid", gradient);
+  }
+}
+
+function blurStamp(cells, width, height, x, y, wrap, asset, target) {
+  const snapshot = [...cells];
+  forBrushCells(x, y, width, height, wrap, (px, py, index) => {
+    cells[index] = blurredPixel(snapshot, width, height, px, py, wrap, asset, target, cells[index]);
+  });
+}
+
+function displaceStamp(cells, width, height, x, y, wrap, motion, target) {
+  if (!motion || (!motion.dx && !motion.dy)) return;
+  const snapshot = [...cells];
+  const maxShift = Math.max(1, Math.round(clampBrushSize(state.brushSize) / 16));
+  const strength = targetStrength(target);
+  forBrushCells(x, y, width, height, wrap, (px, py, index, brush) => {
+    if (!targetPixelPass(target, px, py)) return;
+    const falloff = Math.max(0, 1 - (brush?.distance ?? 0));
+    const shiftX = Math.round(motion.dx * maxShift * falloff * strength);
+    const shiftY = Math.round(motion.dy * maxShift * falloff * strength);
+    if (!shiftX && !shiftY) return;
+    const sx = px - shiftX;
+    const sy = py - shiftY;
+    if (!wrap && (sx < 0 || sy < 0 || sx >= width || sy >= height)) return;
+    cells[index] = snapshot[indexWrapped(sx, sy, width, height)];
+  });
+}
+
+function putBrushPixel(cells, width, height, x, y, wrap, asset, target, mode = "solid", gradient = null) {
+  if (!wrap && (x < 0 || y < 0 || x >= width || y >= height)) return;
+  const index = indexWrapped(x, y, width, height);
+  const px = ((x % width) + width) % width;
+  const py = ((y % height) + height) % height;
+  cells[index] = strokePixelForCell(asset, px, py, width, height, target, cells[index], {
+    noise: mode === "noise",
+    gradient,
+  });
+}
+
+function forBrushCells(x, y, width, height, wrap, visit) {
+  const size = clampBrushSize(state.brushSize);
+  const start = -Math.floor(size / 2);
+  const round = state.brushShape === "round";
+  const center = start + (size - 1) / 2;
+  const radius = Math.max(0.5, size / 2);
+  const radiusSq = radius * radius;
+  const squareRadius = Math.max(0.5, Math.floor(size / 2));
+  const seen = new Set();
+  for (let by = 0; by < size; by += 1) {
+    for (let bx = 0; bx < size; bx += 1) {
+      const dx = start + bx - center;
+      const dy = start + by - center;
+      if (round) {
+        if (dx * dx + dy * dy > radiusSq) continue;
+      }
+      const px = x + start + bx;
+      const py = y + start + by;
+      if (!wrap && (px < 0 || py < 0 || px >= width || py >= height)) continue;
+      const index = indexWrapped(px, py, width, height);
+      if (seen.has(index)) continue;
+      seen.add(index);
+      const distance = round
+        ? Math.min(1, Math.sqrt(dx * dx + dy * dy) / radius)
+        : Math.min(1, Math.max(Math.abs(dx), Math.abs(dy)) / squareRadius);
+      visit(index % width, Math.floor(index / width), index, { distance });
+    }
+  }
+}
+
+function strokePixelForCell(asset, x, y, width, height, target, current, options = {}) {
+  if (state.eraseStroke || state.color === Pixel.Transparent) {
+    return targetPixelPass(target, x, y) ? Pixel.Transparent : current;
+  }
+  if (asset.type !== "cube") {
+    if (!targetPixelPass(target, x, y)) return current;
+    if (options.noise) return Math.random() < 0.5 ? Pixel.Black : Pixel.White;
+    return normalizePixel(state.color);
+  }
+  const range = grayRange();
+  const grayMode = options.forceGradient ? "gradient" : activeRangeMode(state.grayMode, state.grayScale);
+  const opacityMode = options.forceOpacityGradient ? "gradient" : activeRangeMode(state.opacityMode, state.opacityScale);
+  const level = options.noise
+    ? randomInt(range.min, range.max)
+    : rangedValue(grayMode, range.min, range.max, x, y, width, height, options);
+  const opacityRange = paintOpacityRange();
+  const opacity = targetPaintOpacity(
+    target,
+    current,
+    x,
+    y,
+    rangedValue(opacityMode, opacityRange.min, opacityRange.max, x, y, width, height, options) / 100,
+  );
+  return applyPaintOpacity(level, current, opacity);
+}
+
+function rangedValue(mode, min, max, x, y, width, height, options = {}) {
+  if (mode === "random") return randomInt(min, max);
+  if (mode === "gradient" && options.gradient) {
+    return gradientLevelAt(x, y, width, height, options.gradient.from, options.gradient.to, min, max);
+  }
+  if (mode === "radialOut") {
+    return Math.round(min + (max - min) * (options.brush?.distance ?? 0));
+  }
+  if (mode === "radialIn") {
+    return Math.round(min + (max - min) * (1 - (options.brush?.distance ?? 0)));
+  }
+  return min;
+}
+
+function applyPaintOpacity(level, current, opacity) {
+  if (opacity <= 0) return current;
+  if (opacity >= 1 || current === Pixel.Transparent) return grayPixel(level);
+  return grayPixel(Math.round(grayLevelOf(current) + (level - grayLevelOf(current)) * opacity));
+}
+
+function blurredPixel(snapshot, width, height, x, y, wrap, asset, target, current) {
+  if (!targetPixelPass(target, x, y) && (asset.type !== "cube" || current === Pixel.Transparent)) return current;
+  if (asset.type === "cube") {
+    let sum = 0;
+    let count = 0;
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const px = x + dx;
+        const py = y + dy;
+        if (!wrap && (px < 0 || py < 0 || px >= width || py >= height)) continue;
+        const pixel = snapshot[indexWrapped(px, py, width, height)];
+        if (pixel === Pixel.Transparent) continue;
+        sum += grayLevelOf(pixel);
+        count += 1;
+      }
+    }
+    if (!count) return current;
+    return grayPixel(blendZLevel(Math.round(sum / count), target, current));
+  }
+  const counts = new Map();
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const px = x + dx;
+      const py = y + dy;
+      if (!wrap && (px < 0 || py < 0 || px >= width || py >= height)) continue;
+      const pixel = snapshot[indexWrapped(px, py, width, height)];
+      counts.set(pixel, (counts.get(pixel) || 0) + 1);
+    }
+  }
+  let best = current;
+  let bestCount = -1;
+  for (const [pixel, count] of counts.entries()) {
+    if (count > bestCount) {
+      best = pixel;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+function blendZLevel(level, target, current) {
+  const strength = targetStrength(target);
+  if (strength >= 0.999) return level;
+  const base = current === Pixel.Transparent ? level : grayLevelOf(current);
+  return Math.round(base + (level - base) * strength);
+}
+
+function targetStrength(target) {
+  if (!target?.soft) return 1;
+  return Math.max(0, Math.min(1, target.weight ?? 1));
+}
+
+function targetPixelPass(target, x, y) {
+  const strength = targetStrength(target);
+  if (strength >= 0.999) return true;
+  if (strength <= 0.001) return false;
+  const row = ((y + target.index) % 4 + 4) % 4;
+  const col = ((x + target.index * 2) % 4 + 4) % 4;
+  return BAYER4[row][col] < strength * 16;
+}
+
+function targetPaintOpacity(target, current, x, y, opacity) {
+  const strength = targetStrength(target);
+  if (strength >= 0.999) return opacity;
+  if (current === Pixel.Transparent) return targetPixelPass(target, x, y) ? opacity : 0;
+  return opacity * strength;
+}
+
+function grayRange() {
+  if (state.grayScale === "single") {
+    return { min: clampInt(state.grayMin, 0, 255), max: clampInt(state.grayMin, 0, 255) };
+  }
+  return {
+    min: Math.min(state.grayMin, state.grayMax),
+    max: Math.max(state.grayMin, state.grayMax),
+  };
+}
+
+function paintOpacityRange() {
+  if (state.opacityScale === "single") {
+    return { min: clampInt(state.opacityMin, 0, 100), max: clampInt(state.opacityMin, 0, 100) };
+  }
+  return {
+    min: Math.min(state.opacityMin, state.opacityMax),
+    max: Math.max(state.opacityMin, state.opacityMax),
+  };
+}
+
+function gradientLevelAt(x, y, width, height, from = null, to = null, min = 0, max = 255) {
+  const start = from || { x: 0, y: 0 };
+  const end = to || { x: Math.max(1, width - 1), y: 0 };
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSq = dx * dx + dy * dy;
+  const t = lengthSq <= 0
+    ? 0
+    : Math.max(0, Math.min(1, ((x - start.x) * dx + (y - start.y) * dy) / lengthSq));
+  return Math.round(min + (max - min) * t);
 }
 
 function fillAt(x, y) {
@@ -1879,8 +2725,10 @@ function fillAt(x, y) {
   const width = widthOf(asset);
   const height = heightOf(asset);
   pushHistory();
-  for (const cells of targetCells(asset)) {
-    floodFill(cells, width, height, x, y, strokeColor(), wraps(asset));
+  for (const target of targetPaintTargets(asset)) {
+    const index = indexWrapped(x, y, width, height);
+    const color = strokePixelForCell(asset, x, y, width, height, target, target.cells[index]);
+    floodFill(target.cells, width, height, x, y, color, wraps(asset));
   }
   touch(asset);
 }
@@ -2070,14 +2918,16 @@ function shiftCells(cells, width, height, dx, dy, wrap) {
 function commitShape({ from, to }) {
   const asset = activeAsset();
   if (!asset || !from || !to) return;
-  const targets = targetCells(asset);
+  const targets = targetPaintTargets(asset);
   if (!targets.length) return;
   pushHistory();
   const width = widthOf(asset);
   const height = heightOf(asset);
-  for (const cells of targets) {
-    if (state.tool === "line") drawLine(cells, width, height, from.x, from.y, to.x, to.y, strokeColor());
-    if (state.tool === "square") drawSquare(cells, width, height, from.x, from.y, to.x, to.y, strokeColor());
+  for (const target of targets) {
+    const cells = target.cells;
+    if (state.tool === "line") drawLine(cells, width, height, from.x, from.y, to.x, to.y, asset, target);
+    if (state.tool === "square") drawSquare(cells, width, height, from.x, from.y, to.x, to.y, asset, target);
+    if (state.tool === "gradient") drawGradient(cells, width, height, from, to, asset, target);
     if (state.tool === "shift") {
       const shifted = shiftCells(cells, width, height, to.x - from.x, to.y - from.y, wraps(asset));
       for (let i = 0; i < cells.length; i += 1) cells[i] = shifted[i];
@@ -2086,14 +2936,22 @@ function commitShape({ from, to }) {
   touch(asset);
 }
 
-function drawLine(cells, width, height, x0, y0, x1, y1, color) {
+function drawLine(cells, width, height, x0, y0, x1, y1, assetOrColor, target = null) {
+  const asset = assetOrColor && typeof assetOrColor === "object" ? assetOrColor : null;
+  const color = asset ? null : assetOrColor;
+  const wrap = asset ? wraps(asset) : true;
+  const gradient = asset ? strokeGradient({ x: x0, y: y0 }, { x: x1, y: y1 }) : null;
   let dx = Math.abs(x1 - x0);
   let sx = x0 < x1 ? 1 : -1;
   let dy = -Math.abs(y1 - y0);
   let sy = y0 < y1 ? 1 : -1;
   let err = dx + dy;
   while (true) {
-    cells[indexWrapped(x0, y0, width, height)] = color;
+    if (asset) {
+      stampBrush(cells, width, height, x0, y0, wrap, asset, target, "solid", gradient);
+    } else {
+      cells[indexWrapped(x0, y0, width, height)] = color;
+    }
     if (x0 === x1 && y0 === y1) break;
     const e2 = 2 * err;
     if (e2 >= dy) {
@@ -2107,14 +2965,34 @@ function drawLine(cells, width, height, x0, y0, x1, y1, color) {
   }
 }
 
-function drawSquare(cells, width, height, x0, y0, x1, y1, color) {
+function drawSquare(cells, width, height, x0, y0, x1, y1, assetOrColor, target = null) {
+  const asset = assetOrColor && typeof assetOrColor === "object" ? assetOrColor : null;
+  const color = asset ? null : assetOrColor;
+  const wrap = asset ? wraps(asset) : true;
+  const gradient = asset ? strokeGradient({ x: x0, y: y0 }, { x: x1, y: y1 }) : null;
   const left = Math.min(x0, x1);
   const right = Math.max(x0, x1);
   const top = Math.min(y0, y1);
   const bottom = Math.max(y0, y1);
   for (let y = top; y <= bottom; y += 1) {
     for (let x = left; x <= right; x += 1) {
-      cells[indexWrapped(x, y, width, height)] = color;
+      if (!wrap && (x < 0 || y < 0 || x >= width || y >= height)) continue;
+      const index = indexWrapped(x, y, width, height);
+      cells[index] = asset
+        ? strokePixelForCell(asset, index % width, Math.floor(index / width), width, height, target, cells[index], { gradient })
+        : color;
+    }
+  }
+}
+
+function drawGradient(cells, width, height, from, to, asset, target) {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = indexFor(x, y, width);
+      cells[index] = strokePixelForCell(asset, x, y, width, height, target, cells[index], {
+        gradient: { from, to },
+        forceGradient: true,
+      });
     }
   }
 }
@@ -2131,7 +3009,10 @@ function layoutMainCanvas() {
   const height = heightOf(asset) + 2 * margin.y;
   const availWidth = Math.max(60, area.clientWidth - 20);
   const availHeight = Math.max(60, area.clientHeight - 20);
-  const cellSize = Math.min(availWidth / width, availHeight / height, MAX_CANVAS_CELL_SIZE);
+  const fitCellSize = Math.min(availWidth / width, availHeight / height, MAX_CANVAS_CELL_SIZE);
+  const cellSize = Math.min(fitCellSize * zoomFactorForAsset(asset), MAX_CANVAS_CELL_SIZE);
+  area.classList.toggle("zoomable", canZoomAsset(asset));
+  area.classList.toggle("zoomed", canZoomAsset(asset) && state.zoom > 1);
   canvas.style.width = `${Math.floor(width * cellSize)}px`;
   canvas.style.height = `${Math.floor(height * cellSize)}px`;
 }
@@ -2267,10 +3148,14 @@ function withShapePreview(cells, width, height, previewCell) {
     );
   }
   const copy = [...cells];
+  const asset = activeAsset();
+  const target = { cells: copy, index: state.activeTile, weight: 1 };
   if (state.tool === "line") {
-    drawLine(copy, width, height, state.dragStart.x, state.dragStart.y, previewCell.x, previewCell.y, strokeColor());
+    drawLine(copy, width, height, state.dragStart.x, state.dragStart.y, previewCell.x, previewCell.y, asset, target);
   } else if (state.tool === "square") {
-    drawSquare(copy, width, height, state.dragStart.x, state.dragStart.y, previewCell.x, previewCell.y, strokeColor());
+    drawSquare(copy, width, height, state.dragStart.x, state.dragStart.y, previewCell.x, previewCell.y, asset, target);
+  } else if (state.tool === "gradient" && width * height <= 262144) {
+    drawGradient(copy, width, height, state.dragStart, previewCell, asset, target);
   }
   return copy;
 }
@@ -2334,7 +3219,7 @@ function dimWrapMargins(ctx, width, height, marginX, marginY, scale) {
 }
 
 function renderScale(width, height) {
-  return Math.max(MIN_TILE_RENDER_SCALE, Math.ceil(BASE_TILE_RENDER_SIZE / Math.max(width, height)));
+  return Math.max(1, Math.ceil(BASE_TILE_RENDER_SIZE / Math.max(width, height)));
 }
 
 function drawChecker(ctx, canvas, renderWidth, renderHeight) {
@@ -2358,6 +3243,7 @@ function drawChecker(ctx, canvas, renderWidth, renderHeight) {
 }
 
 function drawGridLines(ctx, width, height, scale) {
+  if (scale < 4) return;
   ctx.fillStyle = "rgba(18, 18, 16, 0.16)";
   for (let x = 1; x < width; x += 1) {
     ctx.fillRect(Math.round(x * scale), 0, 1, height * scale);
@@ -2377,6 +3263,58 @@ function indexWrapped(x, y, width, height) {
   const wx = ((x % width) + width) % width;
   const wy = ((y % height) + height) % height;
   return wy * width + wx;
+}
+
+function maxSizeForType(type) {
+  return type === "cube" ? MAX_CUBE_SIZE : MAX_TILE_SIZE;
+}
+
+function maxSizeForAsset(asset) {
+  return maxSizeForType(asset?.type);
+}
+
+function canZoomAsset(asset) {
+  return !!asset && (widthOf(asset) > 64 || heightOf(asset) > 64);
+}
+
+function zoomFactorForAsset(asset) {
+  return canZoomAsset(asset) ? clampZoom(state.zoom) : 1;
+}
+
+function clampZoom(value) {
+  const requested = Number(value);
+  if (!Number.isFinite(requested)) return 1;
+  return ZOOM_LEVELS.reduce((best, next) =>
+    Math.abs(next - requested) < Math.abs(best - requested) ? next : best, ZOOM_LEVELS[0]);
+}
+
+function clampBrushSize(value) {
+  return clampInt(value, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+}
+
+function validPaintScope(scope) {
+  return ["active", "visible", "all", "z", "zsoft"].includes(scope) ? scope : "active";
+}
+
+function validGrayMode(mode) {
+  return validRangeMode(mode);
+}
+
+function validRangeMode(mode) {
+  return ["fixed", "random", "gradient", "radialOut", "radialIn"].includes(mode) ? mode : "fixed";
+}
+
+function validScaleMode(scale) {
+  return scale === "single" ? "single" : "range";
+}
+
+function activeRangeMode(mode, scale) {
+  return scale === "single" ? "fixed" : validRangeMode(mode);
+}
+
+function capitalize(value) {
+  const text = String(value || "");
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
 }
 
 function normalizePixel(value, allowGray = false) {

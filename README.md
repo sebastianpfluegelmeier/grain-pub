@@ -12,7 +12,7 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   space bar toggles).
 - **Cube** — a "wavetable" of textures: N×M slices that loop on all three
   axes. Drawing wraps toroidally on x/y; the canvas shows the tile with a
-  25% wrapped margin on each side (dimmed) so seams are visible while you
+  25% wrapped margin on each side, capped at 32 cells (dimmed), so seams are visible while you
   draw. Cubes are grayscale: a 0–255 slider plus transparent. The z axis
   loops via the same playback controls as animations.
 - **Blockset** — one N×M image built from layers that composite in order.
@@ -22,10 +22,15 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
 ## Editing
 
 - Pens: pen, dither pen (Bayer 4×4; click the tool again to cycle
-  25/50/75% density), noise spray, mirror pen (4-way symmetry). Shapes:
-  line, filled rectangle. Fill bucket flood-fills the clicked region; the
-  shift tool drags the whole tile/frame/layer by a cell offset (wrapping
-  on cubes). Right-click draws transparent (erase) with any tool.
+  25/50/75% density), spray, noise, blur/smudge, and soft displace.
+  Shapes: line, filled rectangle, and whole-canvas gradient. Fill bucket
+  flood-fills the clicked region; the shift tool drags the whole
+  tile/frame/layer by a cell offset (wrapping on cubes). Right-click
+  draws transparent (erase) with any tool.
+- Brush controls include size, square/round shape, active/visible/all
+  target scope, hard Z frame brush, and soft Z falloff brush. Cubes add
+  single/ranged grayscale and opacity controls with fixed, random,
+  stroke-gradient, and radial modes.
 - Select tool: drag a rectangle, drag inside it to move the pixels,
   Cmd/Ctrl+C/X/V to copy/cut/paste (paste lands at the selection origin,
   also across frames and assets), Delete clears, Escape deselects.
@@ -37,8 +42,10 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   between the active frame and the next drawn frame — pixel dissolve for
   animations, grayscale interpolation for cubes. ◂ ▸ reorder frames.
 - New assets start empty; the sample assets carry starter art.
-- Steppers set tile/frame size (4–32, width and height independent for
-  non-tilesets).
+- Steppers set tile/frame size (4–32 for small assets; cubes can be
+  resized up to 1024×1024, with width and height independent).
+- Zoom controls appear for assets larger than 64 cells on either axis,
+  with scrollable canvas panning at higher zoom levels.
 - Gallery cards of animations and cubes play their loop while hovered
   (cubes tiled 2×2 to show the seams).
 - Undo/redo per editing session: toolbar buttons, Cmd/Ctrl+Z,
@@ -77,8 +84,8 @@ the last sync time.
 ## Deploying to GitHub Pages
 
 `./deploy-gh-pages.sh` follows grain's deploy pattern: it rsyncs this
-directory into a sibling `grain-pub` checkout under `asset-editor/`,
-commits and pushes. Served at
-`https://sebastianpfluegelmeier.github.io/grain-pub/asset-editor/`.
+directory into the root of a sibling `grain-pub` checkout, commits and
+pushes. Served at
+`https://sebastianpfluegelmeier.github.io/grain-pub/`.
 Requires `git clone https://github.com/sebastianpfluegelmeier/grain-pub`
 next to the tinygrain repo.
