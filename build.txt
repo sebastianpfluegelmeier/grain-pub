@@ -1,7 +1,3 @@
-built_at=2026-06-01T16:32:47Z
-source_repo=/home/user/grain
-source_commit=ee0834fc9b7588bca1984be8cf24dc45ecd33eb7
-deploy_repo=/home/user/grain-pub
-deploy_commit_before=127b84f9ab109c14b53b2ae9497a0277d0a47103
-bundle_js=assets/index-DGrGiKDX.js
-bundle_css=assets/index-DJLvX7dy.css
+built_at=2026-07-03T08:50:34Z
+source_repo=/Users/sebastianpfluegelmeier/repos/tinygrain/asset-editor
+source_commit=cab7419d95eb28d6327b4be2437a66dd3c2601ec

@@ -1,128 +1,14 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <!-- `user-scalable=no, maximum-scale=1` disables pinch-to-zoom AND the
-         iOS double-tap zoom so taps on UI controls don't accidentally
-         change page zoom. `interactive-widget=overlays-content` keeps the
-         layout viewport fixed when the soft keyboard / hardware-keyboard
-         accessory bar appears — they overlay instead of shrinking content,
-         so the fullscreen canvas + UI don't shift on focus. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
-    <title>grain</title>
-    <!-- PWA / "Add to Home Screen" tags. On iOS Safari, real fullscreen
-         (no URL bar / no tab bar) is only available when the page is
-         launched from a home-screen icon as a web app. The manifest
-         covers Android Chrome; the apple-mobile-web-app-* tags cover
-         iOS-specific launch behaviour. `black-translucent` makes the
-         status bar overlay the canvas instead of consuming a strip. -->
-    <link rel="manifest" href="/grain-pub/manifest.webmanifest" />
-    <!-- JetBrains Mono — heavier strokes than SF Mono, designed for
-         legibility at small sizes. Survives the iPhone→1080p downscale
-         when mirroring to an external screen better than the system
-         monospace. Loaded async via Google Fonts. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="grain" />
-    <meta name="theme-color" content="#0a0a0a" />
-    <style>
-      html, body {
-        margin: 0; padding: 0;
-        /* `100vh` (NOT 100% / 100dvh): in iOS PWA standalone there's
-           no URL bar to retract, so 100vh equals the visual viewport
-           and reaches every edge of the screen. 100% can resolve
-           shorter; 100dvh isn't properly initialised on PWA cold
-           start until a geometry change. */
-        height: 100vh;
-        overflow: hidden;
-        background: #0a0a0a; color: #ddd;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        /* iOS Safari ignores `user-scalable=no` for double-tap-zoom in
-           recent versions; this CSS hint is the modern way to disable
-           the gesture. `manipulation` keeps tap + scroll + pinch-out
-           working but disables double-tap zoom. */
-        touch-action: manipulation;
-        /* Belt-and-suspenders: also disable the long-press callout/menu
-           on UI controls since this is meant to feel like a native app. */
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        user-select: none;
-        overscroll-behavior: none;
-      }
-      canvas#grain-canvas {
-        position: fixed;
-        top: 0; left: 0;
-        /* `100vw / 100vh` so the canvas covers the full screen in
-           iOS PWA standalone (including the home indicator + notch
-           areas — viewport-fit=cover in the meta lets the page
-           extend into those unsafe zones). */
-        width: 100vw;
-        height: 100vh;
-        z-index: 0; background: #000;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
-      }
-      #app { position: relative; z-index: 1; }
-
-      /* The blanket `user-select: none` on body would also block selection
-         in the code editor and any text inputs, which is the wrong UX —
-         re-enable for those specifically. */
-      .cm-editor, .cm-content, input, textarea, [contenteditable], pre {
-        -webkit-user-select: text;
-        user-select: text;
-      }
-
-      /* Keyboard-only focus ring. `:focus-visible` skips mouse/touch
-         clicks (which already give visual feedback via :active) but
-         lights up controls reached via Tab. Uses the accent color
-         tokens.css defines so it sits well against both the white
-         panel-bar buttons and the dark overlay surfaces. */
-      :focus { outline: none; }
-      :focus-visible {
-        outline: 2px solid var(--accent, #ff5252);
-        outline-offset: 2px;
-        border-radius: 4px;
-      }
-      /* The panel-bar pills are already rounded; match them. */
-      .panel-bar button:focus-visible,
-      .panel-menu button:focus-visible { outline-offset: 2px; border-radius: 999px; }
-
-      /* Presentation / fullscreen mode: hide every overlay and the panel
-         bar so only the canvas is visible. The Svelte side toggles
-         body.fs-mode and renders a small ⤓ exit button (separately
-         positioned, opt-in to staying visible). */
-      body.fs-mode .panel-bar,
-      body.fs-mode .overlay,
-      body.fs-mode .status-footer { display: none !important; }
-
-      /* Surface-active mode (mobile only — see App.svelte): the surface
-         grid is the whole viewport, so the panel-bar and status footer
-         are hidden. Drag-to-dismiss closes the sheet. */
-      body.surface-active .panel-bar,
-      body.surface-active .status-footer { display: none !important; }
-
-      /* Tiles editor: same treatment as surface-active. */
-      body.tiles-active .panel-bar,
-      body.tiles-active .status-footer { display: none !important; }
-
-      /* Editor fullscreen mode (drag editor handle > 80%): hide the top
-         panel-bar and the bottom status pill so the editor truly fills the
-         screen. Belt-and-suspenders force-hide the editor's row2 action
-         buttons too, in case the inline `style:display` directive races
-         the CSS-class apply. */
-      body.editor-fs .panel-bar,
-      body.editor-fs .status-footer { display: none !important; }
-      body.editor-fs .program-row2  { display: none !important; }
-    </style>
-    <script type="module" crossorigin src="/grain-pub/assets/index-DGrGiKDX.js"></script>
-    <link rel="stylesheet" crossorigin href="/grain-pub/assets/index-DJLvX7dy.css">
-  <script id="vite-plugin-pwa:register-sw" src="/grain-pub/registerSW.js"></script></head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Grain Assets</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
   <body>
-    <canvas id="grain-canvas"></canvas>
-    <div id="app"></div>
+    <main id="app" class="app" aria-label="Grain asset editor"></main>
+    <script defer src="./src/github-sync.js"></script>
+    <script defer src="./src/app.js"></script>
   </body>
 </html>

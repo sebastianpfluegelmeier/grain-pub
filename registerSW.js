@@ -1,1 +1,0 @@
-if('serviceWorker' in navigator) {window.addEventListener('load', () => {navigator.serviceWorker.register('/grain-pub/sw.js', { scope: '/grain-pub/' })})}
