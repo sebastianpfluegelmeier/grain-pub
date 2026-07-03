@@ -1427,7 +1427,7 @@ h1 {
   }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 520px), (hover: none) and (pointer: coarse), (max-width: 980px) and (orientation: portrait) {
   .app {
     padding:
       max(10px, env(safe-area-inset-top))
