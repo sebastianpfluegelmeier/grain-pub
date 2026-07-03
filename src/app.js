@@ -571,6 +571,10 @@ function hasPlayback(asset) {
   return asset.type === "animation" || asset.type === "cube";
 }
 
+function hasGalleryAnimation(asset) {
+  return (asset.type === "tileset" || hasPlayback(asset)) && cellsOf(asset).length > 1;
+}
+
 function wraps(asset) {
   return asset.type === "cube";
 }
@@ -1022,12 +1026,12 @@ function startGalleryPreviews() {
     clearInterval(galleryTimer);
     galleryTimer = null;
   }
-  if (state.screen !== "gallery" || !state.assets.some(hasPlayback)) return;
+  if (state.screen !== "gallery" || !state.assets.some(hasGalleryAnimation)) return;
   galleryTimer = setInterval(() => {
     if (!hoverPreviewId) return;
     const canvas = document.querySelector(`[data-preview-asset="${hoverPreviewId}"]`);
     const asset = state.assets.find((item) => item.id === hoverPreviewId);
-    if (!canvas || !asset || !hasPlayback(asset)) return;
+    if (!canvas || !asset || !hasGalleryAnimation(asset)) return;
     const card = canvas.closest(".asset-card");
     if (!card || !card.matches(":hover")) {
       hoverPreviewId = null;
@@ -1370,7 +1374,7 @@ function assetCard(asset) {
   canvas.height = heightOf(asset);
   canvas.dataset.previewAsset = asset.id;
   preview.append(canvas);
-  if (hasPlayback(asset)) {
+  if (hasGalleryAnimation(asset)) {
     // Real mouse hover only: touch taps synthesize mouseenter without a
     // matching mouseleave, which left previews animating forever.
     card.addEventListener("pointerenter", (event) => {
@@ -2160,7 +2164,8 @@ function drawCanvases(previewCell = null) {
 
 function drawAssetPreview(canvas, asset, tick) {
   const frames = cellsOf(asset);
-  const frame = hasPlayback(asset) ? frames[tick % frames.length] : frames[0];
+  const frameIndex = hasGalleryAnimation(asset) ? tick % frames.length : 0;
+  const frame = frames[frameIndex];
   const cells = asset.type === "blockset" ? compositeCells(asset) : frame;
   if (asset.type === "cube") {
     const tiled = tiledCells(cells, widthOf(asset), heightOf(asset));
