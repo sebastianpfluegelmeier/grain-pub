@@ -51,6 +51,7 @@ const BAYER4 = [
 ];
 const ONION_PREV_CSS = "rgba(217, 45, 32, 0.32)";
 const ONION_NEXT_CSS = "rgba(39, 90, 210, 0.32)";
+const DOCK_SCROLL_SELECTORS = [".tool-row", ".brush-row", ".frame-actions", ".tile-actions", ".tile-row"];
 const CELL_NOUNS = {
   tileset: "tile",
   animation: "frame",
@@ -85,8 +86,9 @@ const ICONS = {
   stack: `<svg ${ICON_ATTRS}><path d="M8 2.2 14 5.2 8 8.2 2 5.2z"/><path d="M2 8.2l6 3 6-3M2 11.2l6 3 6-3"/></svg>`,
   target: `<svg ${ICON_ATTRS}><circle cx="8" cy="8" r="4.8"/><circle cx="8" cy="8" r="1.6"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2"/></svg>`,
   visible: `<svg ${ICON_ATTRS}><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8s-2.3 4.2-6.2 4.2S1.8 8 1.8 8z"/><path d="M5.6 8h4.8"/></svg>`,
-  zframe: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3h10L5.8 13H13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square" stroke-linejoin="miter"/></svg>`,
-  zsoft: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3h10L5.8 13H13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="square" stroke-linejoin="miter"/><path d="M4.2 12.4h7.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="square" stroke-dasharray="1.4 1.5" opacity=".55"/></svg>`,
+  zframe: `<svg ${ICON_ATTRS}><path d="M3 3.5h10M3 8h10M3 12.5h10"/><path d="M8 2.3v11.4"/><rect x="6.3" y="6.3" width="3.4" height="3.4" fill="currentColor" stroke="none"/></svg>`,
+  zsoft: `<svg ${ICON_ATTRS}><path d="M3 3.5h10M3 8h10M3 12.5h10"/><circle cx="5" cy="8" r="1.8" fill="currentColor" stroke="none"/><circle cx="9" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r=".7" fill="currentColor" stroke="none"/></svg>`,
+  zblend: `<svg ${ICON_ATTRS}><path d="M3 4.2h10M3 8h10M3 11.8h10"/><rect x="4" y="5.7" width="2.2" height="4.6" fill="currentColor" stroke="none"/><rect x="6.9" y="5.7" width="2.2" height="4.6" fill="currentColor" fill-opacity=".55" stroke="none"/><rect x="9.8" y="5.7" width="2.2" height="4.6" fill="currentColor" fill-opacity=".22" stroke="none"/></svg>`,
   fixed: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8"/></svg>`,
   random: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><circle cx="4" cy="5" r="1.3"/><circle cx="11" cy="4" r="1"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="12" cy="11" r="1.2"/><circle cx="4.8" cy="12" r="0.9"/></svg>`,
   radialOut: `<svg ${ICON_ATTRS}><circle cx="8" cy="8" r="5.2"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>`,
@@ -135,6 +137,7 @@ const state = {
   brushSize: 1,
   brushShape: "square",
   zBrushRadius: 1,
+  zFalloffMode: "coverage",
   grayMin: 0,
   grayMax: 255,
   grayScale: "range",
@@ -649,6 +652,7 @@ function dispatch(action) {
     "setBrushShape",
     "setPaintScope",
     "setZBrushRadius",
+    "setZFalloffMode",
     "setGrayRange",
     "setGrayScale",
     "setGrayMode",
@@ -826,10 +830,14 @@ function dispatch(action) {
       break;
     case "setPaintScope":
       state.paintScope = validPaintScope(action.scope);
+      if (action.zFalloffMode) state.zFalloffMode = validZFalloffMode(action.zFalloffMode);
       state.allFrames = state.paintScope === "all";
       break;
     case "setZBrushRadius":
       state.zBrushRadius = clampInt(action.radius, 0, MAX_Z_BRUSH_RADIUS);
+      break;
+    case "setZFalloffMode":
+      state.zFalloffMode = validZFalloffMode(action.mode);
       break;
     case "setGrayRange": {
       const nextMin = clampInt(action.min ?? state.grayMin, 0, 255);
@@ -1109,6 +1117,7 @@ function resizeAsset(asset, requestedWidth, requestedHeight) {
 function render() {
   // The DOM is rebuilt, so any hover state is stale; a genuine hover
   // re-fires mouseenter on the next mouse move.
+  const scrollPositions = captureDockScroll();
   hoverPreviewId = null;
   app.innerHTML = "";
   app.append(topbar());
@@ -1126,8 +1135,24 @@ function render() {
   // pointer coordinates computed against it land on the wrong cells.
   layoutMainCanvas();
   drawCanvases();
+  restoreDockScroll(scrollPositions);
   app.append(refreshButton());
   startGalleryPreviews();
+}
+
+function captureDockScroll() {
+  return DOCK_SCROLL_SELECTORS.reduce((positions, selector) => {
+    const node = app.querySelector(selector);
+    if (node) positions[selector] = node.scrollLeft;
+    return positions;
+  }, {});
+}
+
+function restoreDockScroll(positions) {
+  for (const [selector, scrollLeft] of Object.entries(positions)) {
+    const node = app.querySelector(selector);
+    if (node) node.scrollLeft = scrollLeft;
+  }
 }
 
 // Cards animate only while hovered.
@@ -1732,16 +1757,24 @@ function paintScopeButtons(asset) {
   group.className = "segmented icon-segmented";
   const current = paintScopeFor(asset);
   const scopes = [
-    ["Active target", "target", "active", false],
-    ["Visible layers", "visible", "visible", asset.type !== "blockset"],
-    ["All targets", "stack", "all", false],
-    ["Z frame brush", "zframe", "z", !hasPlayback(asset)],
-    ["Z falloff brush", "zsoft", "zsoft", !hasPlayback(asset)],
-  ];
-  for (const [label, iconName, scope, disabled] of scopes) {
-    const btn = iconButton(label, iconName, `segment-btn icon-segment${current === scope ? " active" : ""}`, () =>
-      dispatch({ type: "setPaintScope", scope }));
-    btn.disabled = disabled;
+    { label: "Active target", iconName: "target", scope: "active" },
+    asset.type === "blockset" ? { label: "Visible layers", iconName: "visible", scope: "visible" } : null,
+    { label: "All targets", iconName: "stack", scope: "all" },
+    hasPlayback(asset) ? { label: "Z frame brush", iconName: "zframe", scope: "z" } : null,
+    hasPlayback(asset) && asset.type === "cube"
+      ? { label: "Dithered Z falloff brush", iconName: "zsoft", scope: "zsoft", zFalloffMode: "coverage" }
+      : null,
+    hasPlayback(asset) && asset.type === "cube"
+      ? { label: "Blended Z falloff brush", iconName: "zblend", scope: "zsoft", zFalloffMode: "blend" }
+      : null,
+    hasPlayback(asset) && asset.type !== "cube"
+      ? { label: "Z falloff brush", iconName: "zsoft", scope: "zsoft" }
+      : null,
+  ].filter(Boolean);
+  for (const { label, iconName, scope, zFalloffMode } of scopes) {
+    const active = current === scope && (!zFalloffMode || validZFalloffMode(state.zFalloffMode) === zFalloffMode);
+    const btn = iconButton(label, iconName, `segment-btn icon-segment${active ? " active" : ""}`, () =>
+      dispatch({ type: "setPaintScope", scope, zFalloffMode }));
     group.append(btn);
   }
   return group;
@@ -1751,6 +1784,8 @@ function zBrushControl(asset) {
   const frames = cellsOf(asset).length;
   const max = Math.min(MAX_Z_BRUSH_RADIUS, Math.max(0, frames - 1));
   const radius = clampInt(state.zBrushRadius, 0, max);
+  const control = document.createElement("div");
+  control.className = "z-brush-control";
   const stepper = document.createElement("div");
   stepper.className = "stepper small flat-stepper";
   const out = document.createElement("span");
@@ -1763,7 +1798,8 @@ function zBrushControl(asset) {
   down.disabled = radius <= 0;
   up.disabled = radius >= max;
   stepper.append(down, out, up);
-  return stepper;
+  control.append(stepper);
+  return control;
 }
 
 function grayRangeControl() {
@@ -1817,8 +1853,6 @@ function scaleRangeControl(config) {
     const highPercent = config.max > 0 ? (high / config.max) * 100 : 0;
     slider.wrap.style.setProperty("--range-min", `${lowPercent}%`);
     slider.wrap.style.setProperty("--range-max", `${highPercent}%`);
-    slider.wrap.style.setProperty("--range-min-split", `${Math.min(100, lowPercent * 2)}%`);
-    slider.wrap.style.setProperty("--range-max-split", `${Math.max(0, (highPercent - 50) * 2)}%`);
   };
   const update = (nextMin, nextMax = nextMin) => {
     const low = config.scale === "single"
@@ -1837,26 +1871,32 @@ function scaleRangeControl(config) {
       state.opacityMax = high;
     }
     min.value = String(low);
+    if (max) max.value = String(high);
     slider.min.value = String(low);
     if (slider.max) slider.max.value = String(high);
+    slider.min.syncUI?.();
+    slider.max?.syncUI?.();
     updateCss(config.scale === "single" ? 0 : low, high);
     config.onUpdate?.(low, high);
   };
-  const commit = () => {
-    if (config.scale === "single") update(clampInt(min.value, 0, config.max));
-    else update(clampInt(min.value, 0, config.max), clampInt(max.value, 0, config.max));
+  const commitCurrent = () => {
     dispatch({ type: config.setRangeType, min: currentMin, max: currentMax });
   };
-  min.addEventListener("change", commit);
+  const commitNumbers = () => {
+    if (config.scale === "single") update(clampInt(min.value, 0, config.max));
+    else update(clampInt(min.value, 0, config.max), clampInt(max.value, 0, config.max));
+    commitCurrent();
+  };
+  min.addEventListener("change", commitNumbers);
   slider.min.addEventListener("input", () => update(clampInt(slider.min.value, 0, config.max), currentMax));
-  slider.min.addEventListener("change", commit);
+  slider.min.addEventListener("change", commitCurrent);
   values.append(min, slider.wrap);
   let max = null;
   if (config.scale === "range") {
     max = grayRangeNumber(`Maximum ${config.label}`, currentMax, config.max);
-    max.addEventListener("change", commit);
+    max.addEventListener("change", commitNumbers);
     slider.max.addEventListener("input", () => update(currentMin, clampInt(slider.max.value, 0, config.max)));
-    slider.max.addEventListener("change", commit);
+    slider.max.addEventListener("change", commitCurrent);
     values.append(max);
   }
   update(currentMin, currentMax);
@@ -1911,16 +1951,21 @@ function grayRangeNumber(label, value, max = 255) {
 
 function dualRangeSlider(kind, minValue, maxValue, max, label) {
   const wrap = document.createElement("div");
-  wrap.className = `gray-dual-slider split-dual-slider ${kind}-dual-slider`;
+  wrap.className = `gray-dual-slider dual-handle-slider ${kind}-dual-slider`;
   wrap.style.setProperty("--range-min", `${(minValue / max) * 100}%`);
   wrap.style.setProperty("--range-max", `${(maxValue / max) * 100}%`);
-  const minHalf = rangeSliderHalf("min");
-  const maxHalf = rangeSliderHalf("max");
-  const min = rangeInput(`Minimum ${label} slider`, "min", minValue, max);
-  const maxInput = rangeInput(`Maximum ${label} slider`, "max", maxValue, max);
-  minHalf.append(min);
-  maxHalf.append(maxInput);
-  wrap.append(minHalf, maxHalf);
+  const track = document.createElement("span");
+  track.className = "gray-slider-track";
+  const fill = document.createElement("span");
+  fill.className = "gray-slider-fill";
+  const minThumb = dualRangeThumb(`Minimum ${label}`);
+  minThumb.classList.add("min-thumb");
+  const maxThumb = dualRangeThumb(`Maximum ${label}`);
+  maxThumb.classList.add("max-thumb");
+  const min = proxyRangeInput(minThumb, minValue, max);
+  const maxInput = proxyRangeInput(maxThumb, maxValue, max);
+  bindDualRangeSlider(wrap, min, maxInput, max, minThumb, maxThumb);
+  wrap.append(track, fill, minThumb, maxThumb, min, maxInput);
   return { wrap, min, max: maxInput };
 }
 
@@ -1938,15 +1983,87 @@ function singleRangeSlider(kind, value, max, label) {
   return { wrap, min };
 }
 
-function rangeSliderHalf(kind) {
-  const half = document.createElement("div");
-  half.className = `slider-half slider-half-${kind}`;
-  const track = document.createElement("span");
-  track.className = "gray-slider-track";
-  const fill = document.createElement("span");
-  fill.className = "gray-slider-fill";
-  half.append(track, fill);
-  return half;
+function dualRangeThumb(label) {
+  const thumb = document.createElement("span");
+  thumb.className = "gray-slider-thumb";
+  thumb.tabIndex = 0;
+  thumb.setAttribute("role", "slider");
+  thumb.setAttribute("aria-label", label);
+  thumb.setAttribute("aria-valuemin", "0");
+  thumb.setAttribute("aria-valuemax", "0");
+  return thumb;
+}
+
+function proxyRangeInput(thumb, value, max) {
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.value = String(value);
+  input.max = String(max);
+  input.syncUI = () => {
+    thumb.setAttribute("aria-valuemax", String(max));
+    thumb.setAttribute("aria-valuenow", String(input.value));
+  };
+  return input;
+}
+
+function bindDualRangeSlider(wrap, minInput, maxInput, max, minThumb, maxThumb) {
+  const valueFromClientX = (clientX) => {
+    const rect = wrap.getBoundingClientRect();
+    const t = rect.width <= 0 ? 0 : Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return Math.round(t * max);
+  };
+  const setInputValue = (input, value, commit = false) => {
+    const lower = input === minInput ? 0 : clampInt(minInput.value, 0, max);
+    const upper = input === minInput ? clampInt(maxInput.value, 0, max) : max;
+    input.value = String(clampInt(value, lower, upper));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    if (commit) input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const nearestInput = (value) => {
+    const minDistance = Math.abs(value - clampInt(minInput.value, 0, max));
+    const maxDistance = Math.abs(value - clampInt(maxInput.value, 0, max));
+    return minDistance <= maxDistance ? minInput : maxInput;
+  };
+  const beginDrag = (input, event) => {
+    event.preventDefault();
+    wrap.setPointerCapture?.(event.pointerId);
+    setInputValue(input, valueFromClientX(event.clientX));
+    const move = (moveEvent) => setInputValue(input, valueFromClientX(moveEvent.clientX));
+    const finish = (upEvent) => {
+      setInputValue(input, valueFromClientX(upEvent.clientX), true);
+      wrap.removeEventListener("pointermove", move);
+      wrap.removeEventListener("pointerup", finish);
+      wrap.removeEventListener("pointercancel", cancel);
+    };
+    const cancel = () => {
+      wrap.removeEventListener("pointermove", move);
+      wrap.removeEventListener("pointerup", finish);
+      wrap.removeEventListener("pointercancel", cancel);
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    wrap.addEventListener("pointermove", move);
+    wrap.addEventListener("pointerup", finish);
+    wrap.addEventListener("pointercancel", cancel);
+  };
+  wrap.addEventListener("pointerdown", (event) => {
+    const value = valueFromClientX(event.clientX);
+    const input = event.target === minThumb ? minInput : event.target === maxThumb ? maxInput : nearestInput(value);
+    beginDrag(input, event);
+  });
+  const keyHandler = (input) => (event) => {
+    const step = event.shiftKey ? 10 : 1;
+    const current = clampInt(input.value, 0, max);
+    let next = current;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") next = current - step;
+    else if (event.key === "ArrowRight" || event.key === "ArrowUp") next = current + step;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = max;
+    else return;
+    event.preventDefault();
+    setInputValue(input, next, true);
+  };
+  minThumb.addEventListener("keydown", keyHandler(minInput));
+  maxThumb.addEventListener("keydown", keyHandler(maxInput));
 }
 
 function rangeInput(label, handle, value, max) {
@@ -2307,6 +2424,7 @@ function targetPaintTargets(asset) {
   }
   if (scope === "z" || scope === "zsoft") {
     const radius = clampInt(state.zBrushRadius, 0, Math.min(MAX_Z_BRUSH_RADIUS, layers.length - 1));
+    const softMode = asset.type === "cube" ? validZFalloffMode(state.zFalloffMode) : "coverage";
     const targets = new Map();
     for (let dz = -radius; dz <= radius; dz += 1) {
       const index = (activeIndex + dz + layers.length) % layers.length;
@@ -2314,7 +2432,7 @@ function targetPaintTargets(asset) {
       const weight = scope === "zsoft" && radius > 0 ? 1 - distance / (radius + 1) : 1;
       const current = targets.get(index);
       if (!current || weight > current.weight) {
-        targets.set(index, { cells: layers[index], index, weight, soft: scope === "zsoft" });
+        targets.set(index, { cells: layers[index], index, weight, soft: scope === "zsoft", softMode });
       }
     }
     return [...targets.values()].sort((a, b) => Math.abs(a.index - activeIndex) - Math.abs(b.index - activeIndex));
@@ -2596,7 +2714,9 @@ function strokePixelForCell(asset, x, y, width, height, target, current, options
     y,
     rangedValue(opacityMode, opacityRange.min, opacityRange.max, x, y, width, height, options) / 100,
   );
-  return applyPaintOpacity(level, current, opacity);
+  return applyPaintOpacity(level, current, opacity, {
+    transparentBase: target?.softMode === "blend" ? 255 : null,
+  });
 }
 
 function rangedValue(mode, min, max, x, y, width, height, options = {}) {
@@ -2613,9 +2733,15 @@ function rangedValue(mode, min, max, x, y, width, height, options = {}) {
   return min;
 }
 
-function applyPaintOpacity(level, current, opacity) {
+function applyPaintOpacity(level, current, opacity, options = {}) {
   if (opacity <= 0) return current;
-  if (opacity >= 1 || current === Pixel.Transparent) return grayPixel(level);
+  if (opacity >= 1) return grayPixel(level);
+  if (current === Pixel.Transparent) {
+    if (Number.isFinite(options.transparentBase)) {
+      return grayPixel(Math.round(options.transparentBase + (level - options.transparentBase) * opacity));
+    }
+    return grayPixel(level);
+  }
   return grayPixel(Math.round(grayLevelOf(current) + (level - grayLevelOf(current)) * opacity));
 }
 
@@ -2662,7 +2788,7 @@ function blurredPixel(snapshot, width, height, x, y, wrap, asset, target, curren
 function blendZLevel(level, target, current) {
   const strength = targetStrength(target);
   if (strength >= 0.999) return level;
-  const base = current === Pixel.Transparent ? level : grayLevelOf(current);
+  const base = current === Pixel.Transparent && target?.softMode === "blend" ? 255 : grayLevelOf(current);
   return Math.round(base + (level - base) * strength);
 }
 
@@ -2683,6 +2809,7 @@ function targetPixelPass(target, x, y) {
 function targetPaintOpacity(target, current, x, y, opacity) {
   const strength = targetStrength(target);
   if (strength >= 0.999) return opacity;
+  if (target?.softMode === "blend") return opacity * strength;
   if (current === Pixel.Transparent) return targetPixelPass(target, x, y) ? opacity : 0;
   return opacity * strength;
 }
@@ -3294,6 +3421,10 @@ function clampBrushSize(value) {
 
 function validPaintScope(scope) {
   return ["active", "visible", "all", "z", "zsoft"].includes(scope) ? scope : "active";
+}
+
+function validZFalloffMode(mode) {
+  return mode === "blend" ? "blend" : "coverage";
 }
 
 function validGrayMode(mode) {
