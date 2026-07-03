@@ -38,6 +38,12 @@ body {
   background: var(--bg);
   color: var(--ink);
   overscroll-behavior: none;
+  touch-action: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
 }
 
 button,
@@ -1449,6 +1455,7 @@ h1 {
   .asset-grid {
     grid-auto-rows: 158px;
     gap: 10px;
+    overflow: hidden;
   }
 
   .create-panel {
@@ -1468,7 +1475,8 @@ h1 {
 
   .editor-head .size-group {
     min-width: 0;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    overflow: hidden;
     padding: 2px 3px 4px 0;
     scrollbar-width: none;
   }
@@ -1490,6 +1498,7 @@ h1 {
     grid-template-rows: repeat(6, auto);
     gap: 6px;
     padding: 8px;
+    overflow: hidden;
   }
 
   .tool-row,
@@ -1501,15 +1510,14 @@ h1 {
     grid-column: 1;
     width: 100%;
     min-width: 0;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex-wrap: wrap;
+    overflow: hidden;
     justify-content: flex-start;
   }
 
   .tool-row {
     grid-row: 1;
-    row-gap: 0;
+    row-gap: 4px;
   }
 
   .color-row {

@@ -161,6 +161,24 @@ let hoverPreviewId = null;
 // Test/debug hook; not part of the UI contract.
 window.__grainState = state;
 
+installViewportLocks();
+
+function installViewportLocks() {
+  const prevent = (event) => {
+    if (event.cancelable) event.preventDefault();
+  };
+  for (const name of ["gesturestart", "gesturechange", "gestureend"]) {
+    document.addEventListener(name, prevent, { passive: false });
+  }
+  document.addEventListener("dblclick", prevent, { passive: false });
+  document.addEventListener("touchmove", (event) => {
+    const target = event.target;
+    const allowsDrag = target instanceof Element
+      && target.closest(".drawing-canvas, input[type='range'], .gray-dual-slider");
+    if (event.touches.length > 1 || !allowsDrag) prevent(event);
+  }, { passive: false });
+}
+
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && state.pendingDelete) {
     dispatch({ type: "cancelDelete" });
