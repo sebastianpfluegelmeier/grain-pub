@@ -2,7 +2,8 @@
 
 Static browser editor for TinyGrain assets. Open `index.html` in a browser —
 no build step. Assets live in `localStorage`, with optional git sync to a
-GitHub repo.
+GitHub repo. The editor exports runtime assets as TinyGrain binary
+`.grainasset` files.
 
 ## Asset types
 
@@ -44,15 +45,31 @@ GitHub repo.
   Shift+Cmd/Ctrl+Z or Ctrl+Y. History covers strokes, shapes, resizes and
   tile/frame/layer add/duplicate/remove.
 - Gallery: create (four buttons), open, rename, delete (with confirm).
+- Export: the editor header downloads the active asset as a binary
+  `.grainasset` file for use from TinyGrain source.
+
+## TinyGrain runtime
+
+- `tileset("asset.grainasset", selector)` selects binary tiles by index.
+- `animation("asset.grainasset", t)` loops `floor(t * asset_fps)` over
+  frames; use `animation_frame` for direct frame indices.
+- `cube("asset.grainasset", x, y, z)` samples a looping grayscale field.
+- `blockset("asset.grainasset", texture, threshold)` displays each block
+  when the average texture value under its non-transparent pixels exceeds
+  the threshold.
 
 ## Git sync
 
-The Sync panel (gallery top right) pushes/pulls all assets as JSON files
-under `asset-editor/` in a GitHub repo (default `grain-userdata`, same repo
-the grain web app syncs to). Client-side only, ported from grain's
+The Sync panel (gallery top right) pushes/pulls all assets as binary
+`.grainasset` files under `asset-editor/` in a GitHub repo (default
+`grain-userdata`, same repo the grain web app syncs to). A local checkout
+of that repo can be referenced directly from Grain source, for example
+`tileset("../grain-userdata/asset-editor/basic_tiles.grainasset", selector)`.
+Client-side only, ported from grain's
 `grain-web-app/src/github-sync.js`: supply a fine-grained personal access
 token with `contents: read/write` on that one repo. Push is a single
-commit (adds, updates and deletions); pull is remote-wins by asset name.
+commit (adds, updates and deletions, including removal of old synced JSON
+files); pull is remote-wins by asset name.
 When configured, the editor pulls once on startup, gallery cards show a
 yellow dot on assets modified since the last sync, and the topbar shows
 the last sync time.

@@ -23,6 +23,17 @@ const Pixel = {
   Black: 1,
   White: 2,
 };
+const BINARY_ASSET_MAGIC = [0x54, 0x47, 0x41, 0x53]; // TGAS
+const BINARY_ASSET_VERSION = 1;
+const BINARY_ASSET_HEADER_SIZE = 18;
+const BINARY_ASSET_KIND = {
+  tileset: 1,
+  animation: 2,
+  cube: 3,
+  blockset: 4,
+};
+const BINARY_KIND_ASSET = Object.fromEntries(Object.entries(BINARY_ASSET_KIND).map(([type, kind]) => [kind, type]));
+const BINARY_ASSET_VISIBLE = 0x01;
 const GRAY_BASE = 10;
 const WRAP_MARGIN_RATIO = 0.25;
 const PEN_TOOLS = ["pen", "dither", "spray", "mirror"];
@@ -70,6 +81,7 @@ const ICONS = {
   forward: `<svg ${ICON_ATTRS}><path d="M6.2 3.4 10.8 8l-4.6 4.6"/></svg>`,
   play: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M5 3.2v9.6L13 8z"/></svg>`,
   pause: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><rect x="4.2" y="3.4" width="2.8" height="9.2"/><rect x="9" y="3.4" width="2.8" height="9.2"/></svg>`,
+  download: `<svg ${ICON_ATTRS}><path d="M8 2.6v7.2"/><path d="M5.2 7.1 8 9.9l2.8-2.8"/><path d="M3.2 12.8h9.6"/></svg>`,
   eye: `<svg ${ICON_ATTRS}><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8s-2.3 4.2-6.2 4.2S1.8 8 1.8 8z"/><circle cx="8" cy="8" r="1.9"/></svg>`,
   eyeOff: `<svg ${ICON_ATTRS}><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8s-2.3 4.2-6.2 4.2S1.8 8 1.8 8z"/><path d="M3.2 12.8 12.8 3.2"/></svg>`,
 };
@@ -391,6 +403,142 @@ function normalizeGrid(cells, width, height, allowGray = false) {
 
 function saveAssets() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ assets: state.assets }));
+}
+
+/* ---------- Binary export ---------- */
+
+function exportActiveAsset() {
+  const asset = activeAsset();
+  if (!asset) return;
+  try {
+    const bytes = encodeBinaryAsset(asset);
+    const blob = new Blob([bytes], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${sanitizeName(asset.name || asset.type) || asset.type}.grainasset`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    state.flash = `Exported ${link.download}`;
+  } catch (error) {
+    state.flash = `Export failed: ${error.message}`;
+  }
+  render();
+}
+
+function encodeBinaryAsset(asset) {
+  const kind = BINARY_ASSET_KIND[asset.type];
+  if (!kind) throw new Error(`unsupported asset type ${asset.type}`);
+  const width = widthOf(asset);
+  const height = heightOf(asset);
+  const items = cellsOf(asset);
+  const count = items.length;
+  if (width > 0xffff || height > 0xffff || count > 0xffff) {
+    throw new Error("asset dimensions are too large");
+  }
+  const cellsPerItem = width * height;
+  const totalCells = cellsPerItem * count;
+  const byteLength = BINARY_ASSET_HEADER_SIZE + count + totalCells * 2;
+  const bytes = new Uint8Array(byteLength);
+  const view = new DataView(bytes.buffer);
+  bytes.set(BINARY_ASSET_MAGIC, 0);
+  view.setUint16(4, BINARY_ASSET_VERSION, true);
+  view.setUint8(6, kind);
+  view.setUint8(7, 0);
+  view.setUint16(8, width, true);
+  view.setUint16(10, height, true);
+  view.setUint16(12, count, true);
+  view.setUint16(14, hasPlayback(asset) ? asset.fps : 0, true);
+  view.setUint16(16, 0, true);
+
+  let offset = BINARY_ASSET_HEADER_SIZE;
+  for (let i = 0; i < count; i += 1) {
+    const visible = asset.type === "blockset" && asset.visibility[i] !== false;
+    view.setUint8(offset, visible ? BINARY_ASSET_VISIBLE : 0);
+    offset += 1;
+  }
+
+  const allowGray = asset.type === "cube";
+  for (const cells of items) {
+    for (let i = 0; i < cellsPerItem; i += 1) {
+      view.setUint16(offset, normalizePixel(cells[i], allowGray), true);
+      offset += 2;
+    }
+  }
+  return bytes;
+}
+
+function decodeBinaryAsset(bytes, name) {
+  if (bytes instanceof ArrayBuffer) bytes = new Uint8Array(bytes);
+  if (!(bytes instanceof Uint8Array)) throw new Error("asset bytes must be Uint8Array");
+  if (bytes.length < BINARY_ASSET_HEADER_SIZE) throw new Error("binary asset is truncated");
+  for (let i = 0; i < BINARY_ASSET_MAGIC.length; i += 1) {
+    if (bytes[i] !== BINARY_ASSET_MAGIC[i]) throw new Error("not a TinyGrain asset");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const version = view.getUint16(4, true);
+  if (version !== BINARY_ASSET_VERSION) throw new Error(`unsupported asset version ${version}`);
+  const type = BINARY_KIND_ASSET[view.getUint8(6)];
+  if (!type) throw new Error(`unknown asset type ${view.getUint8(6)}`);
+  const width = view.getUint16(8, true);
+  const height = view.getUint16(10, true);
+  const count = view.getUint16(12, true);
+  const fps = view.getUint16(14, true);
+  if (!width || !height || !count) throw new Error("asset has zero dimensions");
+  const cellsPerItem = width * height;
+  const cellsStart = BINARY_ASSET_HEADER_SIZE + count;
+  const expected = cellsStart + cellsPerItem * count * 2;
+  if (bytes.length !== expected) throw new Error("asset byte length does not match header");
+
+  const flags = [];
+  for (let i = 0; i < count; i += 1) flags.push(view.getUint8(BINARY_ASSET_HEADER_SIZE + i));
+
+  let offset = cellsStart;
+  const items = [];
+  for (let item = 0; item < count; item += 1) {
+    const cells = [];
+    for (let i = 0; i < cellsPerItem; i += 1) {
+      cells.push(view.getUint16(offset, true));
+      offset += 2;
+    }
+    items.push(cells);
+  }
+
+  const assetName = sanitizeName(name || type);
+  if (type === "tileset") {
+    return normalizeAsset({
+      id: freshId(),
+      type,
+      name: assetName,
+      tileSize: width,
+      tiles: items,
+      updatedAt: Date.now(),
+    });
+  }
+  if (type === "blockset") {
+    return normalizeAsset({
+      id: freshId(),
+      type,
+      name: assetName,
+      width,
+      height,
+      layers: items,
+      visibility: flags.map((flag) => (flag & BINARY_ASSET_VISIBLE) !== 0),
+      updatedAt: Date.now(),
+    });
+  }
+  return normalizeAsset({
+    id: freshId(),
+    type,
+    name: assetName,
+    width,
+    height,
+    fps: fps || DEFAULT_FPS,
+    frames: items,
+    updatedAt: Date.now(),
+  });
 }
 
 /* ---------- Asset accessors ---------- */
@@ -864,6 +1012,7 @@ function render() {
   // pointer coordinates computed against it land on the wrong cells.
   layoutMainCanvas();
   drawCanvases();
+  app.append(refreshButton());
   startGalleryPreviews();
 }
 
@@ -950,6 +1099,31 @@ function topbar() {
   return header;
 }
 
+function refreshButton() {
+  const el = iconButton("Refresh page", "sync", "refresh-btn", hardReloadApp);
+  return el;
+}
+
+async function hardReloadApp() {
+  try {
+    const regs = await navigator.serviceWorker?.getRegistrations?.();
+    if (regs) await Promise.all(regs.map((registration) => registration.unregister()));
+  } catch (error) {
+    console.warn("service worker unregister failed:", error);
+  }
+  try {
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch (error) {
+    console.warn("cache clear failed:", error);
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.set("_", Date.now().toString());
+  window.location.replace(url.toString());
+}
+
 /* ---------- Git sync ---------- */
 
 function syncConfig() {
@@ -1006,7 +1180,12 @@ function setSyncStatus(message, busy = state.syncBusy) {
 }
 
 function assetRemotePath(asset) {
-  return `${SYNC_PREFIX}${asset.name}.json`;
+  return `${SYNC_PREFIX}${asset.name}.grainasset`;
+}
+
+function assetNameFromRemotePath(path) {
+  const file = path.split("/").pop() || "asset";
+  return sanitizeName(file.replace(/\.grainasset$/i, ""));
 }
 
 async function syncPush() {
@@ -1020,12 +1199,14 @@ async function syncPush() {
     const remote = await GrainSync.listTree(token, owner, repo, SYNC_BRANCH);
     const localPaths = new Set(state.assets.map(assetRemotePath));
     const deletes = (remote ? remote.tree : [])
-      .filter((entry) => entry.path.startsWith(SYNC_PREFIX) && entry.path.endsWith(".json"))
+      .filter((entry) =>
+        entry.path.startsWith(SYNC_PREFIX)
+        && (entry.path.endsWith(".grainasset") || entry.path.endsWith(".json")))
       .map((entry) => entry.path)
       .filter((path) => !localPaths.has(path));
     const files = state.assets.map((asset) => ({
       path: assetRemotePath(asset),
-      contentBytes: new TextEncoder().encode(JSON.stringify(asset, null, 2)),
+      contentBytes: encodeBinaryAsset(asset),
     }));
     if (files.length === 0 && deletes.length === 0) {
       setSyncStatus("Nothing to push.", false);
@@ -1050,17 +1231,16 @@ async function syncPull() {
   try {
     const remote = await GrainSync.listTree(token, owner, repo, SYNC_BRANCH);
     const entries = (remote ? remote.tree : [])
-      .filter((entry) => entry.path.startsWith(SYNC_PREFIX) && entry.path.endsWith(".json"));
+      .filter((entry) => entry.path.startsWith(SYNC_PREFIX) && entry.path.endsWith(".grainasset"));
     let pulled = 0;
     for (const entry of entries) {
       const bytes = await GrainSync.getBlob(token, owner, repo, entry.sha);
-      let parsed = null;
+      let asset = null;
       try {
-        parsed = JSON.parse(new TextDecoder().decode(bytes));
+        asset = decodeBinaryAsset(bytes, assetNameFromRemotePath(entry.path));
       } catch {
         continue;
       }
-      const asset = normalizeAsset(parsed);
       if (!asset) continue;
       const index = state.assets.findIndex((item) => item.name === asset.name);
       if (index >= 0) state.assets[index] = asset;
@@ -1088,7 +1268,7 @@ function syncOverlay() {
   box.ariaLabel = "Git sync";
   box.innerHTML = `
     <p class="confirm-title">Git sync</p>
-    <p class="confirm-note">Assets sync as JSON to github.com/&lt;owner&gt;/&lt;repo&gt; under ${SYNC_PREFIX} — fine-grained token, contents read/write.</p>
+    <p class="confirm-note">Assets sync as TinyGrain .grainasset files to github.com/&lt;owner&gt;/&lt;repo&gt; under ${SYNC_PREFIX} — fine-grained token, contents read/write.</p>
   `;
   const fields = document.createElement("div");
   fields.className = "sync-fields";
@@ -1261,6 +1441,7 @@ function editorScreen() {
         dispatch({ type: "resizeAsset", width: asset.width, height: value })),
     );
   }
+  sizeGroup.append(iconTextButton("Export", "download", "btn", () => exportActiveAsset()));
   head.append(rename, sizeGroup);
   wrap.append(head);
 
@@ -1983,9 +2164,31 @@ function drawAssetPreview(canvas, asset, tick) {
   const cells = asset.type === "blockset" ? compositeCells(asset) : frame;
   if (asset.type === "cube") {
     const tiled = tiledCells(cells, widthOf(asset), heightOf(asset));
-    drawGrid(canvas, tiled.width, tiled.height, tiled.cells);
+    drawPreviewGrid(canvas, tiled.width, tiled.height, tiled.cells);
   } else {
-    drawGrid(canvas, widthOf(asset), heightOf(asset), cells);
+    drawPreviewGrid(canvas, widthOf(asset), heightOf(asset), cells);
+  }
+}
+
+function drawPreviewGrid(canvas, width, height, cells) {
+  if (!cells) return;
+  const scale = renderScale(width, height);
+  const renderWidth = width * scale;
+  const renderHeight = height * scale;
+  if (canvas.width !== renderWidth || canvas.height !== renderHeight) {
+    canvas.width = renderWidth;
+    canvas.height = renderHeight;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, renderWidth, renderHeight);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const pixel = cells[indexFor(x, y, width)];
+      if (pixel === Pixel.Transparent) continue;
+      ctx.fillStyle = cssForPixel(pixel);
+      ctx.fillRect(x * scale, y * scale, scale, scale);
+    }
   }
 }
 
