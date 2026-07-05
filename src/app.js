@@ -1287,6 +1287,24 @@ async function hardReloadApp() {
   } catch (error) {
     console.warn("cache clear failed:", error);
   }
+  // Unregistering the service worker and clearing the Cache API is not enough:
+  // iOS home-screen web apps still serve app.js/styles.css from the HTTP disk
+  // cache, and a plain reload only cache-busts the document URL, not those
+  // sub-resources. Re-fetch every same-origin script/stylesheet (plus the
+  // document) with cache: "reload" to force the network and refresh those
+  // cache entries, so the reload below actually loads the new code.
+  try {
+    const urls = new Set([window.location.pathname]);
+    document.querySelectorAll("script[src], link[rel='stylesheet'][href]").forEach((node) => {
+      const src = node.getAttribute("src") || node.getAttribute("href");
+      if (!src) return;
+      const abs = new URL(src, window.location.href);
+      if (abs.origin === window.location.origin) urls.add(abs.href);
+    });
+    await Promise.all([...urls].map((url) => fetch(url, { cache: "reload" }).catch(() => {})));
+  } catch (error) {
+    console.warn("resource refresh failed:", error);
+  }
   const url = new URL(window.location.href);
   url.searchParams.set("_", Date.now().toString());
   window.location.replace(url.toString());
