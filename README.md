@@ -42,8 +42,9 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   between the active frame and the next drawn frame — pixel dissolve for
   animations, grayscale interpolation for cubes. ◂ ▸ reorder frames.
 - New assets start empty; the sample assets carry starter art.
-- Steppers set tile/frame size (4–32 for small assets; cubes can be
-  resized up to 1024×1024, with width and height independent).
+- Steppers set tile/frame size (4–32 for tilesets and animations;
+  blocksets can be resized up to 512×512 and cubes up to 1024×1024, with
+  width and height independent).
 - Zoom controls appear for assets larger than 64 cells on either axis,
   with scrollable canvas panning at higher zoom levels.
 - Gallery cards of animations and cubes play their loop while hovered

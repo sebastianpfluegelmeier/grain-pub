@@ -9,6 +9,7 @@ const SYNC_STATE_KEY = "grain.assets.sync.state";
 const DEFAULT_TILE_SIZE = 16;
 const MIN_TILE_SIZE = 4;
 const MAX_TILE_SIZE = 32;
+const MAX_BLOCKSET_SIZE = 512;
 const MAX_CUBE_SIZE = 1024;
 const DEFAULT_FPS = 8;
 const MIN_FPS = 1;
@@ -176,6 +177,15 @@ function installViewportLocks() {
     const allowsDrag = target instanceof Element
       && target.closest(".drawing-canvas, input[type='range'], .gray-dual-slider");
     if (event.touches.length > 1 || !allowsDrag) prevent(event);
+  }, { passive: false });
+  // Block browser zoom (ctrl/pinch wheel and ctrl +/-/0); canvas zoom uses buttons.
+  document.addEventListener("wheel", (event) => {
+    if (event.ctrlKey) prevent(event);
+  }, { passive: false });
+  document.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && ["+", "-", "=", "0"].includes(event.key)) {
+      prevent(event);
+    }
   }, { passive: false });
 }
 
@@ -429,8 +439,9 @@ function normalizeFramed(asset) {
 }
 
 function normalizeBlockset(asset) {
-  const width = clampInt(asset.width || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, MAX_TILE_SIZE);
-  const height = clampInt(asset.height || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, MAX_TILE_SIZE);
+  const maxSize = maxSizeForType("blockset");
+  const width = clampInt(asset.width || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
+  const height = clampInt(asset.height || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
   const source = Array.isArray(asset.layers) ? asset.layers : [];
   const layers = source.map((layer) => normalizeGrid(layer, width, height));
   if (!layers.length) layers.push(blankGrid(width, height));
@@ -3411,7 +3422,9 @@ function indexWrapped(x, y, width, height) {
 }
 
 function maxSizeForType(type) {
-  return type === "cube" ? MAX_CUBE_SIZE : MAX_TILE_SIZE;
+  if (type === "cube") return MAX_CUBE_SIZE;
+  if (type === "blockset") return MAX_BLOCKSET_SIZE;
+  return MAX_TILE_SIZE;
 }
 
 function maxSizeForAsset(asset) {
