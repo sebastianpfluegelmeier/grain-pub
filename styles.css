@@ -38,7 +38,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   overscroll-behavior: none;
-  touch-action: none;
+  touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;

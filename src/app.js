@@ -23,6 +23,8 @@ const MIN_BRUSH_SIZE = 1;
 const MAX_BRUSH_SIZE = 64;
 const MAX_Z_BRUSH_RADIUS = 16;
 const HISTORY_LIMIT = 100;
+const TOUCH_DRAW_THRESHOLD_PX = 6;
+const PEN_PALM_REJECTION_MS = 800;
 const Pixel = {
   Transparent: 0,
   Black: 1,
@@ -158,9 +160,23 @@ const app = document.querySelector("#app");
 let galleryTimer = null;
 let previewTick = 0;
 let hoverPreviewId = null;
+let activeCanvasPointerId = null;
+let activeCanvasPointerType = null;
+let penPalmRejectionUntil = 0;
+const canvasTouchGesture = {
+  mode: "idle", // "idle" | "pending" | "drawing" | "panning"
+  pointers: new Map(),
+  primaryId: null,
+  startEvent: null,
+  lastCentroid: null,
+  area: null,
+  rollback: null,
+  blockDrawing: false,
+};
 
 // Test/debug hook; not part of the UI contract.
 window.__grainState = state;
+window.__grainCanvasGesture = canvasTouchGesture;
 
 installViewportLocks();
 
@@ -173,10 +189,25 @@ function installViewportLocks() {
   }
   document.addEventListener("dblclick", prevent, { passive: false });
   document.addEventListener("touchmove", (event) => {
+    const stylusTouch = [...Array.from(event.touches), ...Array.from(event.changedTouches)]
+      .some((touch) => touch.touchType === "stylus");
     const target = event.target;
-    const allowsDrag = target instanceof Element
-      && target.closest(".drawing-canvas, input[type='range'], .gray-dual-slider");
-    if (event.touches.length > 1 || !allowsDrag) prevent(event);
+    const onDrawingCanvas = target instanceof Element && !!target.closest(".drawing-canvas");
+    // The canvas owns its gesture policy. Let the Pencil stream continue
+    // even when iPadOS reports a palm as a second touch; pointer ownership
+    // below rejects that palm without cancelling the pen stroke.
+    if (stylusTouch && onDrawingCanvas) return;
+    if (event.touches.length > 1) {
+      prevent(event);
+      return;
+    }
+    if (stylusTouch) return;
+    const allowsInteraction = target instanceof Element
+      && target.closest(
+        ".drawing-canvas, button, input, select, textarea, a, "
+        + "[role='button'], [role='slider'], .gray-dual-slider, .asset-card, .tile-thumb",
+      );
+    if (!allowsInteraction) prevent(event);
   }, { passive: false });
   // Block browser zoom (ctrl/pinch wheel and ctrl +/-/0); canvas zoom uses buttons.
   document.addEventListener("wheel", (event) => {
@@ -1053,6 +1084,11 @@ function pushHistory() {
 }
 
 function applySnapshot(asset, snapshot) {
+  restoreSnapshot(asset, snapshot);
+  touch(asset);
+}
+
+function restoreSnapshot(asset, snapshot) {
   const cells = snapshot.cells.map((cell) => [...cell]);
   if (asset.type === "tileset") {
     asset.tileSize = snapshot.width;
@@ -1067,7 +1103,6 @@ function applySnapshot(asset, snapshot) {
       : cells.map(() => true);
   }
   state.activeTile = Math.min(snapshot.activeTile, cells.length - 1);
-  touch(asset);
 }
 
 /* ---------- Playback ---------- */
@@ -1170,17 +1205,33 @@ function render() {
 }
 
 function captureDockScroll() {
-  return DOCK_SCROLL_SELECTORS.reduce((positions, selector) => {
+  const positions = {
+    dock: {},
+    canvas: null,
+  };
+  for (const selector of DOCK_SCROLL_SELECTORS) {
     const node = app.querySelector(selector);
-    if (node) positions[selector] = node.scrollLeft;
-    return positions;
-  }, {});
+    if (node) positions.dock[selector] = node.scrollLeft;
+  }
+  const canvasArea = app.querySelector(".canvas-area");
+  if (canvasArea) {
+    positions.canvas = {
+      left: canvasArea.scrollLeft,
+      top: canvasArea.scrollTop,
+    };
+  }
+  return positions;
 }
 
 function restoreDockScroll(positions) {
-  for (const [selector, scrollLeft] of Object.entries(positions)) {
+  for (const [selector, scrollLeft] of Object.entries(positions.dock)) {
     const node = app.querySelector(selector);
     if (node) node.scrollLeft = scrollLeft;
+  }
+  const canvasArea = app.querySelector(".canvas-area");
+  if (canvasArea && positions.canvas) {
+    canvasArea.scrollLeft = positions.canvas.left;
+    canvasArea.scrollTop = positions.canvas.top;
   }
 }
 
@@ -1640,8 +1691,9 @@ function editorScreen() {
   canvas.addEventListener("pointerdown", onCanvasPointerDown);
   canvas.addEventListener("pointermove", onCanvasPointerMove);
   canvas.addEventListener("pointerup", onCanvasPointerUp);
-  canvas.addEventListener("pointercancel", onCanvasPointerUp);
+  canvas.addEventListener("pointercancel", onCanvasPointerCancel);
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+  canvasArea.addEventListener("wheel", onCanvasWheel, { passive: false });
   canvasArea.append(canvas);
   wrap.append(canvasArea);
 
@@ -2311,6 +2363,300 @@ function colorButton(label, swatch, color) {
 /* ---------- Canvas input ---------- */
 
 function onCanvasPointerDown(event) {
+  if (event.pointerType === "pen") {
+    noteCanvasPenInput();
+    cancelCanvasTouchForPen();
+  }
+  if (event.pointerType === "touch" && state.pointerDown && activeCanvasPointerType !== "touch") {
+    event.preventDefault();
+    return;
+  }
+  if (event.pointerType !== "touch" && canvasTouchGesture.mode !== "idle") {
+    event.preventDefault();
+    return;
+  }
+  if (event.pointerType === "touch" && canvasUsesTouchGestures(event.currentTarget)) {
+    onCanvasTouchPointerDown(event);
+    return;
+  }
+  beginCanvasPointerDown(event);
+}
+
+function onCanvasPointerMove(event) {
+  if (event.pointerType === "pen"
+    && (event.pointerId === activeCanvasPointerId || event.buttons > 0 || event.pressure > 0)) {
+    noteCanvasPenInput();
+  }
+  if (event.pointerType === "touch" && canvasTouchGesture.mode !== "idle") {
+    onCanvasTouchPointerMove(event);
+    return;
+  }
+  moveCanvasPointer(event);
+}
+
+function onCanvasPointerUp(event) {
+  if (event.pointerType === "pen") noteCanvasPenInput();
+  if (event.pointerType === "touch" && canvasTouchGesture.mode !== "idle") {
+    onCanvasTouchPointerUp(event);
+    return;
+  }
+  finishCanvasPointer(event);
+}
+
+function onCanvasPointerCancel(event) {
+  if (event.pointerType === "pen") noteCanvasPenInput();
+  if (event.pointerType === "touch" && canvasTouchGesture.mode !== "idle") {
+    onCanvasTouchPointerCancel(event);
+    return;
+  }
+  if (state.pointerDown && event.pointerId === activeCanvasPointerId) {
+    resetActiveCanvasPointer();
+    render();
+  }
+}
+
+function canvasUsesTouchGestures(canvas) {
+  const asset = activeAsset();
+  return !!asset
+    && canvas instanceof Element
+    && !!canvas.closest(".canvas-area");
+}
+
+function noteCanvasPenInput() {
+  penPalmRejectionUntil = Date.now() + PEN_PALM_REJECTION_MS;
+}
+
+function cancelCanvasTouchForPen() {
+  if (canvasTouchGesture.mode === "drawing") rollbackCanvasTouchDrawing();
+  else if (activeCanvasPointerType === "touch") resetActiveCanvasPointer();
+  resetCanvasTouchGesture();
+}
+
+function canvasPointerSnapshot(event) {
+  return {
+    button: event.button === 2 ? 2 : 0,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    currentTarget: event.currentTarget,
+    pointerId: event.pointerId,
+    pointerType: event.pointerType,
+  };
+}
+
+function touchCentroid() {
+  if (!canvasTouchGesture.pointers.size) return null;
+  let x = 0;
+  let y = 0;
+  for (const point of canvasTouchGesture.pointers.values()) {
+    x += point.x;
+    y += point.y;
+  }
+  return {
+    x: x / canvasTouchGesture.pointers.size,
+    y: y / canvasTouchGesture.pointers.size,
+  };
+}
+
+function resetCanvasTouchGesture() {
+  canvasTouchGesture.mode = "idle";
+  canvasTouchGesture.pointers.clear();
+  canvasTouchGesture.primaryId = null;
+  canvasTouchGesture.startEvent = null;
+  canvasTouchGesture.lastCentroid = null;
+  canvasTouchGesture.area = null;
+  canvasTouchGesture.rollback = null;
+  canvasTouchGesture.blockDrawing = false;
+}
+
+function captureCanvasTouchRollback() {
+  const asset = activeAsset();
+  return {
+    assetId: asset?.id || null,
+    assetUpdatedAt: asset?.updatedAt,
+    assetSnapshot: null,
+    activeTile: state.activeTile,
+    historyPast: [...state.history.past],
+    historyFuture: [...state.history.future],
+    selection: state.selection ? { ...state.selection } : null,
+  };
+}
+
+function beginCanvasTouchDrawing(moveEvent = null) {
+  const rollback = captureCanvasTouchRollback();
+  const previousHistory = rollback.historyPast[rollback.historyPast.length - 1];
+  canvasTouchGesture.mode = "drawing";
+  beginCanvasPointerDown(canvasTouchGesture.startEvent);
+  const currentHistory = state.history.past[state.history.past.length - 1];
+  if (currentHistory && currentHistory !== previousHistory) {
+    rollback.assetSnapshot = currentHistory;
+  }
+  canvasTouchGesture.rollback = rollback;
+  if (moveEvent && state.pointerDown) moveCanvasPointer(moveEvent);
+}
+
+function rollbackCanvasTouchDrawing() {
+  const rollback = canvasTouchGesture.rollback;
+  const asset = rollback?.assetId
+    ? state.assets.find((item) => item.id === rollback.assetId)
+    : null;
+  if (asset && rollback.assetSnapshot) {
+    restoreSnapshot(asset, rollback.assetSnapshot);
+    asset.updatedAt = rollback.assetUpdatedAt;
+    saveAssets();
+  }
+  if (rollback) {
+    state.activeTile = rollback.activeTile;
+    state.history.past = rollback.historyPast;
+    state.history.future = rollback.historyFuture;
+    state.selection = rollback.selection;
+  }
+  resetActiveCanvasPointer();
+  canvasTouchGesture.rollback = null;
+  drawCanvases();
+}
+
+function beginCanvasTouchPan(canvas) {
+  canvasTouchGesture.mode = "panning";
+  canvasTouchGesture.area = canvas.closest(".canvas-area");
+  canvasTouchGesture.lastCentroid = touchCentroid();
+}
+
+function onCanvasTouchPointerDown(event) {
+  event.preventDefault();
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  canvasTouchGesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+  if (canvasTouchGesture.mode === "panning") {
+    canvasTouchGesture.lastCentroid = touchCentroid();
+    return;
+  }
+
+  if (canvasTouchGesture.mode === "idle") {
+    canvasTouchGesture.mode = "pending";
+    canvasTouchGesture.primaryId = event.pointerId;
+    canvasTouchGesture.startEvent = canvasPointerSnapshot(event);
+    canvasTouchGesture.blockDrawing = Date.now() < penPalmRejectionUntil;
+    return;
+  }
+
+  if (canvasTouchGesture.pointers.size >= 2
+    && (canvasTouchGesture.mode === "pending" || canvasTouchGesture.mode === "drawing")) {
+    if (canvasTouchGesture.mode === "drawing") rollbackCanvasTouchDrawing();
+    beginCanvasTouchPan(event.currentTarget);
+  }
+}
+
+function onCanvasTouchPointerMove(event) {
+  const point = canvasTouchGesture.pointers.get(event.pointerId);
+  if (!point) return;
+  event.preventDefault();
+  point.x = event.clientX;
+  point.y = event.clientY;
+
+  if (canvasTouchGesture.mode === "panning") {
+    const centroid = touchCentroid();
+    const previous = canvasTouchGesture.lastCentroid;
+    const area = canvasTouchGesture.area;
+    if (area && centroid && previous) {
+      area.scrollLeft -= centroid.x - previous.x;
+      area.scrollTop -= centroid.y - previous.y;
+    }
+    canvasTouchGesture.lastCentroid = centroid;
+    return;
+  }
+
+  if (event.pointerId !== canvasTouchGesture.primaryId) return;
+  if (canvasTouchGesture.mode === "pending") {
+    const start = canvasTouchGesture.startEvent;
+    const distance = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY);
+    // Fill is a tap operation that rebuilds the DOM immediately; keep it
+    // pending until release so a second finger can always claim the gesture.
+    if (canvasTouchGesture.blockDrawing
+      || distance < TOUCH_DRAW_THRESHOLD_PX
+      || state.tool === "fill") return;
+    beginCanvasTouchDrawing(event);
+    return;
+  }
+  if (canvasTouchGesture.mode === "drawing") moveCanvasPointer(event);
+}
+
+function onCanvasTouchPointerUp(event) {
+  event.preventDefault();
+  if (canvasTouchGesture.mode === "panning") {
+    canvasTouchGesture.pointers.delete(event.pointerId);
+    if (!canvasTouchGesture.pointers.size) resetCanvasTouchGesture();
+    else canvasTouchGesture.lastCentroid = touchCentroid();
+    return;
+  }
+
+  if (event.pointerId !== canvasTouchGesture.primaryId) {
+    canvasTouchGesture.pointers.delete(event.pointerId);
+    return;
+  }
+
+  if (canvasTouchGesture.mode === "pending") {
+    const startEvent = canvasTouchGesture.startEvent;
+    const blockDrawing = canvasTouchGesture.blockDrawing;
+    resetCanvasTouchGesture();
+    if (blockDrawing) return;
+    beginCanvasPointerDown(startEvent, false);
+    if (state.pointerDown) finishCanvasPointer(event);
+    return;
+  }
+
+  if (canvasTouchGesture.mode === "drawing") {
+    canvasTouchGesture.pointers.delete(event.pointerId);
+    finishCanvasPointer(event);
+    resetCanvasTouchGesture();
+  }
+}
+
+function onCanvasTouchPointerCancel(event) {
+  event.preventDefault();
+  if (canvasTouchGesture.mode === "panning") {
+    canvasTouchGesture.pointers.delete(event.pointerId);
+    if (!canvasTouchGesture.pointers.size) {
+      resetCanvasTouchGesture();
+    } else {
+      if (event.pointerId === canvasTouchGesture.primaryId) {
+        canvasTouchGesture.primaryId = canvasTouchGesture.pointers.keys().next().value;
+      }
+      canvasTouchGesture.lastCentroid = touchCentroid();
+    }
+    return;
+  }
+  if (canvasTouchGesture.mode === "drawing") rollbackCanvasTouchDrawing();
+  canvasTouchGesture.pointers.delete(event.pointerId);
+  if (!canvasTouchGesture.pointers.size || event.pointerId === canvasTouchGesture.primaryId) {
+    resetCanvasTouchGesture();
+  } else if (canvasTouchGesture.mode === "panning") {
+    canvasTouchGesture.lastCentroid = touchCentroid();
+  }
+}
+
+function onCanvasWheel(event) {
+  if (event.ctrlKey || state.zoom <= 1) return;
+  const area = event.currentTarget;
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? Math.max(area.clientWidth, area.clientHeight)
+      : 1;
+  let dx = event.deltaX * unit;
+  let dy = event.deltaY * unit;
+  if (event.shiftKey && Math.abs(dx) < 0.001) {
+    dx = dy;
+    dy = 0;
+  }
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return;
+  event.preventDefault();
+  area.scrollLeft += dx;
+  area.scrollTop += dy;
+}
+
+function beginCanvasPointerDown(event, capture = true) {
+  if (state.pointerDown) return;
+  if (event.pointerType === "mouse" && event.button !== 0 && event.button !== 2) return;
   const asset = activeAsset();
   const cell = cellFromEvent(event);
   if (!asset || !cell) return;
@@ -2325,7 +2671,9 @@ function onCanvasPointerDown(event) {
     render();
     return;
   }
-  event.currentTarget.setPointerCapture?.(event.pointerId);
+  if (capture) event.currentTarget.setPointerCapture?.(event.pointerId);
+  activeCanvasPointerId = event.pointerId;
+  activeCanvasPointerType = event.pointerType;
   state.pointerDown = true;
   if (state.tool === "select") {
     const clamped = clampCell(asset, cell);
@@ -2360,10 +2708,11 @@ function onCanvasPointerDown(event) {
   }
 }
 
-function onCanvasPointerMove(event) {
+function moveCanvasPointer(event) {
+  if (!state.pointerDown || event.pointerId !== activeCanvasPointerId) return;
   const asset = activeAsset();
   const cell = cellFromEvent(event);
-  if (!asset || !cell || !state.pointerDown) return;
+  if (!asset || !cell) return;
   if (state.tool === "select") {
     const clamped = clampCell(asset, cell);
     if (state.selectDrag === "marquee") {
@@ -2384,10 +2733,12 @@ function onCanvasPointerMove(event) {
   }
 }
 
-function onCanvasPointerUp(event) {
-  if (!state.pointerDown) return;
+function finishCanvasPointer(event) {
+  if (!state.pointerDown || event.pointerId !== activeCanvasPointerId) return;
   const cell = cellFromEvent(event) || state.dragStart;
   state.pointerDown = false;
+  activeCanvasPointerId = null;
+  activeCanvasPointerType = null;
   if (state.tool === "select") {
     if (state.selectDrag === "move") commitSelectionMove();
     state.selectDrag = null;
@@ -2425,6 +2776,19 @@ function onCanvasPointerUp(event) {
     render();
     return;
   }
+  state.dragStart = null;
+  state.eraseStroke = false;
+  state.lastPaintCell = null;
+  state.strokePath = [];
+  state.strokeBase = null;
+}
+
+function resetActiveCanvasPointer() {
+  state.pointerDown = false;
+  activeCanvasPointerId = null;
+  activeCanvasPointerType = null;
+  state.selectDrag = null;
+  state.moveOffset = null;
   state.dragStart = null;
   state.eraseStroke = false;
   state.lastPaintCell = null;

@@ -46,7 +46,12 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   blocksets can be resized up to 512×512 and cubes up to 1024×1024, with
   width and height independent).
 - Zoom controls appear for assets larger than 64 cells on either axis,
-  with scrollable canvas panning at higher zoom levels.
+  with scrollable canvas panning at higher zoom levels. Trackpad scrolling
+  and two-finger touch dragging pan the canvas; one-finger touch, pen, and
+  mouse input continue to draw. Apple Pencil input also operates buttons,
+  steppers, and sliders throughout the editor. While drawing with Pencil,
+  palm/finger contacts are rejected; a deliberate two-finger pan remains
+  available between strokes.
 - Gallery cards of animations and cubes play their loop while hovered
   (cubes tiled 2×2 to show the seams).
 - Undo/redo per editing session: toolbar buttons, Cmd/Ctrl+Z,
