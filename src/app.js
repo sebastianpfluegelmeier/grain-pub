@@ -27,6 +27,8 @@ const HISTORY_LIMIT = 100;
 const MAX_PARTICLE_PREVIEW_COUNT = 500;
 const PARTICLE_PREVIEW_WIDTH = 480;
 const PARTICLE_PREVIEW_HEIGHT = 240;
+const MIN_PARTICLE_PREVIEW_SIZE = 16;
+const MAX_PARTICLE_PREVIEW_SIZE = 1024;
 const TOUCH_DRAW_THRESHOLD_PX = 6;
 const PEN_PALM_REJECTION_MS = 800;
 const Pixel = {
@@ -76,8 +78,8 @@ const PARTICLE_PREVIEW_DEFAULTS = Object.freeze({
   driftY: 0,
   movement: 12,
   dirChange: 0.5,
-  xSize: 1,
-  ySize: 1,
+  canvasWidth: PARTICLE_PREVIEW_WIDTH,
+  canvasHeight: PARTICLE_PREVIEW_HEIGHT,
 });
 
 const ICON_ATTRS = 'viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
@@ -575,8 +577,8 @@ function normalizeParticlePreview(preview) {
     driftY: clampNumber(source.driftY ?? PARTICLE_PREVIEW_DEFAULTS.driftY, -200, 200),
     movement: clampNumber(source.movement ?? PARTICLE_PREVIEW_DEFAULTS.movement, 0, 200),
     dirChange: clampNumber(source.dirChange ?? PARTICLE_PREVIEW_DEFAULTS.dirChange, 0, 10),
-    xSize: clampNumber(source.xSize ?? PARTICLE_PREVIEW_DEFAULTS.xSize, 0.25, 8),
-    ySize: clampNumber(source.ySize ?? PARTICLE_PREVIEW_DEFAULTS.ySize, 0.25, 8),
+    canvasWidth: clampInt(source.canvasWidth ?? PARTICLE_PREVIEW_DEFAULTS.canvasWidth, MIN_PARTICLE_PREVIEW_SIZE, MAX_PARTICLE_PREVIEW_SIZE),
+    canvasHeight: clampInt(source.canvasHeight ?? PARTICLE_PREVIEW_DEFAULTS.canvasHeight, MIN_PARTICLE_PREVIEW_SIZE, MAX_PARTICLE_PREVIEW_SIZE),
   };
 }
 
@@ -2147,8 +2149,8 @@ function particlePreviewPanel(asset) {
   canvasWrap.className = "particle-preview-canvas-wrap";
   const canvas = document.createElement("canvas");
   canvas.className = "particle-preview-canvas";
-  canvas.width = PARTICLE_PREVIEW_WIDTH;
-  canvas.height = PARTICLE_PREVIEW_HEIGHT;
+  canvas.width = asset.preview.canvasWidth;
+  canvas.height = asset.preview.canvasHeight;
   canvasWrap.append(canvas);
   const controls = document.createElement("div");
   controls.className = "particle-preview-controls";
@@ -2159,8 +2161,8 @@ function particlePreviewPanel(asset) {
     { key: "driftY", label: "Drift Y", min: -200, max: 200, step: 1, unit: "px/s" },
     { key: "movement", label: "Movement", min: 0, max: 200, step: 1, unit: "px/s" },
     { key: "dirChange", label: "Direction change", min: 0, max: 10, step: 0.1, unit: "/s" },
-    { key: "xSize", label: "X size", min: 0.25, max: 8, step: 0.25, unit: "×" },
-    { key: "ySize", label: "Y size", min: 0.25, max: 8, step: 0.25, unit: "×" },
+    { key: "canvasWidth", label: "Canvas width", min: MIN_PARTICLE_PREVIEW_SIZE, max: MAX_PARTICLE_PREVIEW_SIZE, step: 1, unit: "px", integer: true },
+    { key: "canvasHeight", label: "Canvas height", min: MIN_PARTICLE_PREVIEW_SIZE, max: MAX_PARTICLE_PREVIEW_SIZE, step: 1, unit: "px", integer: true },
   ];
   for (const config of configs) controls.append(particlePreviewControl(asset, config));
   body.append(canvasWrap, controls);
@@ -2182,12 +2184,17 @@ function particlePreviewControl(asset, config) {
   input.step = String(config.step);
   input.value = String(asset.preview[config.key]);
   input.ariaLabel = config.label;
+  const isInteger = config.key === "number" || config.integer === true;
   input.addEventListener("input", () => {
-    const value = config.key === "number"
+    const value = isInteger
       ? clampInt(input.value, config.min, config.max)
       : clampNumber(input.value, config.min, config.max);
     asset.preview = normalizeParticlePreview({ ...asset.preview, [config.key]: value });
     saveAssets();
+    if (config.key === "canvasWidth" || config.key === "canvasHeight") {
+      const canvas = document.querySelector(".particle-preview-canvas");
+      if (canvas) resizeParticlePreviewCanvas(canvas, asset);
+    }
   });
   input.addEventListener("change", () => {
     input.value = String(asset.preview[config.key]);
@@ -4204,8 +4211,8 @@ function createParticlePreviewInstance(asset, index) {
     directionIndex: 1,
   };
   instance.particleId = asset.particles[Math.floor(nextParticleRandom(instance) * asset.particles.length)].id;
-  instance.x = nextParticleRandom(instance) * PARTICLE_PREVIEW_WIDTH;
-  instance.y = nextParticleRandom(instance) * PARTICLE_PREVIEW_HEIGHT;
+  instance.x = nextParticleRandom(instance) * asset.preview.canvasWidth;
+  instance.y = nextParticleRandom(instance) * asset.preview.canvasHeight;
   instance.phase = nextParticleRandom(instance) * 32;
   instance.directionFrom = nextParticleRandom(instance) * Math.PI * 2;
   instance.directionTo = nextParticleRandom(instance) * Math.PI * 2;
@@ -4230,17 +4237,21 @@ function updateParticlePreview(asset, dt) {
       + shortestAngle(instance.directionFrom, instance.directionTo) * directionT;
     const velocityX = config.driftX + Math.cos(direction) * config.movement;
     const velocityY = config.driftY + Math.sin(direction) * config.movement;
-    instance.x = wrapNumber(instance.x + velocityX * dt, PARTICLE_PREVIEW_WIDTH);
-    instance.y = wrapNumber(instance.y + velocityY * dt, PARTICLE_PREVIEW_HEIGHT);
+    instance.x = wrapNumber(instance.x + velocityX * dt, config.canvasWidth);
+    instance.y = wrapNumber(instance.y + velocityY * dt, config.canvasHeight);
     instance.phase += dt * asset.fps * config.speed;
   }
 }
 
+function resizeParticlePreviewCanvas(canvas, asset) {
+  const width = asset.preview.canvasWidth;
+  const height = asset.preview.canvasHeight;
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+}
+
 function drawParticlePreview(canvas, asset) {
-  if (canvas.width !== PARTICLE_PREVIEW_WIDTH || canvas.height !== PARTICLE_PREVIEW_HEIGHT) {
-    canvas.width = PARTICLE_PREVIEW_WIDTH;
-    canvas.height = PARTICLE_PREVIEW_HEIGHT;
-  }
+  resizeParticlePreviewCanvas(canvas, asset);
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   drawParticlePreviewChecker(ctx, canvas.width, canvas.height);
@@ -4249,17 +4260,17 @@ function drawParticlePreview(canvas, asset) {
     if (!particle) particle = asset.particles[instance.index % asset.particles.length];
     const frameIndex = wrapInteger(Math.floor(instance.phase), particle.frames.length);
     const frame = particle.frames[frameIndex];
-    const particleWidth = particle.width * asset.preview.xSize;
-    const particleHeight = particle.height * asset.preview.ySize;
-    const left = instance.x - particleWidth / 2;
-    const top = instance.y - particleHeight / 2;
+    // Snap to whole pixels so each source pixel maps to one canvas pixel:
+    // fractional fillRect coordinates get anti-aliased, which reads as blur.
+    const left = Math.round(instance.x - particle.width / 2);
+    const top = Math.round(instance.y - particle.height / 2);
     for (const offsetY of [-canvas.height, 0, canvas.height]) {
       for (const offsetX of [-canvas.width, 0, canvas.width]) {
         const copyLeft = left + offsetX;
         const copyTop = top + offsetY;
         if (copyLeft >= canvas.width || copyTop >= canvas.height
-          || copyLeft + particleWidth <= 0 || copyTop + particleHeight <= 0) continue;
-        drawParticleFrame(ctx, particle, frame, copyLeft, copyTop, asset.preview.xSize, asset.preview.ySize);
+          || copyLeft + particle.width <= 0 || copyTop + particle.height <= 0) continue;
+        drawParticleFrame(ctx, particle, frame, copyLeft, copyTop);
       }
     }
   }
@@ -4277,13 +4288,13 @@ function drawParticlePreviewChecker(ctx, width, height) {
   }
 }
 
-function drawParticleFrame(ctx, particle, frame, left, top, scaleX, scaleY) {
+function drawParticleFrame(ctx, particle, frame, left, top) {
   for (let y = 0; y < particle.height; y += 1) {
     for (let x = 0; x < particle.width; x += 1) {
       const pixel = frame[indexFor(x, y, particle.width)];
       if (pixel === Pixel.Transparent) continue;
       ctx.fillStyle = cssForPixel(pixel);
-      ctx.fillRect(left + x * scaleX, top + y * scaleY, scaleX, scaleY);
+      ctx.fillRect(left + x, top + y, 1, 1);
     }
   }
 }

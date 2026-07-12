@@ -15,8 +15,10 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   count; selecting a particle opens its frames in the animation editor.
   A collapsible swarm preview exposes editor-only controls for count,
   animation speed, X/Y drift, random movement, direction-change rate, and
-  X/Y size. Preview positions use subpixel motion, change heading smoothly,
-  and wrap seamlessly across all four edges.
+  the preview canvas size. Particles render at their native resolution with
+  nearest-neighbor (pixel-snapped) drawing for a crisp look. Preview
+  positions use subpixel motion, change heading smoothly, and wrap
+  seamlessly across all four edges.
 - **Cube** — a "wavetable" of textures: N×M slices that loop on all three
   axes. Drawing wraps toroidally on x/y; the canvas shows the tile with a
   25% wrapped margin on each side, capped at 32 cells (dimmed), so seams are visible while you
