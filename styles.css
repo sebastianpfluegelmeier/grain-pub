@@ -1710,7 +1710,9 @@ h1 {
   .asset-grid {
     grid-auto-rows: 158px;
     gap: 10px;
-    overflow: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .create-panel {

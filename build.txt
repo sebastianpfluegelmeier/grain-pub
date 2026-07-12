@@ -1,3 +1,3 @@
-built_at=2026-07-12T12:22:57Z
+built_at=2026-07-12T14:06:25Z
 source_repo=/home/user/tinygrain/asset-editor
-source_commit=930fcb5540621c88cc120f36319573dcf73836c8
+source_commit=343b9bf9f97944d22efc5d6595ff9d3dfd8967ad
