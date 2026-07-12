@@ -315,7 +315,7 @@ h1 {
 
 .create-panel {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   padding-right: 6px;
 }
@@ -352,12 +352,259 @@ h1 {
   padding: 2px 0 0 2px;
 }
 
+.editor.particles-editor {
+  grid-template-rows: max-content max-content minmax(120px, 1fr) max-content max-content;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: none;
+}
+
+.editor.particles-editor::-webkit-scrollbar {
+  display: none;
+}
+
 .editor-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
   padding-right: 6px;
+}
+
+/* ---------- Particle assets ---------- */
+
+.particle-list-panel {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.particle-list-heading {
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 0 7px;
+  border-right: 1px solid var(--line);
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.particle-list-heading span:last-child {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.particle-list {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.particle-list::-webkit-scrollbar {
+  display: none;
+}
+
+.particle-item {
+  min-width: 112px;
+  height: 54px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+}
+
+.particle-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.particle-item.active {
+  border-color: var(--accent);
+  box-shadow: 2px 2px 0 var(--accent);
+}
+
+.particle-item canvas {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  background: var(--checker-a);
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.particle-item > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.particle-item b,
+.particle-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.particle-item b {
+  font-size: 9px;
+}
+
+.particle-item small {
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.particle-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 7px;
+  border-left: 1px solid var(--line);
+}
+
+.particle-list-actions .btn {
+  min-height: 32px;
+  padding: 0 9px;
+  box-shadow: 2px 2px 0 var(--ink);
+  font-size: 11px;
+}
+
+.particle-preview-panel {
+  border: 1px solid var(--ink);
+  background: var(--surface);
+}
+
+.particle-preview-panel > summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.particle-preview-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.particle-preview-panel > summary::before {
+  content: "+";
+  width: 13px;
+  font-family: var(--mono);
+  font-size: 15px;
+}
+
+.particle-preview-panel[open] > summary::before {
+  content: "−";
+}
+
+.particle-preview-panel > summary:hover {
+  background: var(--accent-soft);
+}
+
+.particle-preview-panel > summary small {
+  margin-left: auto;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.particle-preview-body {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.2fr) minmax(280px, 1fr);
+  gap: 10px;
+  padding: 9px;
+  border-top: 1px solid var(--ink);
+}
+
+.particle-preview-canvas-wrap {
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--ink);
+  background: var(--checker-a);
+}
+
+.particle-preview-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 1;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.particle-preview-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: center;
+  gap: 6px 8px;
+}
+
+.particle-preview-control {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.particle-preview-value {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.particle-preview-value input {
+  width: 58px;
+  height: 27px;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  color: var(--ink);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.particle-preview-value small {
+  width: 27px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 8px;
 }
 
 .canvas-area {
@@ -1476,6 +1723,10 @@ h1 {
     gap: 10px;
   }
 
+  .editor.particles-editor {
+    grid-template-rows: max-content max-content minmax(120px, 1fr) max-content max-content;
+  }
+
   .editor-head {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -1496,6 +1747,34 @@ h1 {
 
   .canvas-area {
     min-height: 120px;
+  }
+
+  .particle-list-panel {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+  }
+
+  .particle-list-heading {
+    grid-column: 1 / -1;
+    width: auto;
+    flex-direction: row;
+    justify-content: space-between;
+    padding: 0 2px 6px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .particle-list-actions .btn span {
+    display: none;
+  }
+
+  .particle-list-actions .btn {
+    width: 32px;
+    padding: 0;
+  }
+
+  .particle-preview-body {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .drawing-canvas {

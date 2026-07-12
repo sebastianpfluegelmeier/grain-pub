@@ -8,6 +8,7 @@ const SYNC_PREFIX = "asset-editor/";
 const SYNC_STATE_KEY = "grain.assets.sync.state";
 const DEFAULT_TILE_SIZE = 16;
 const MIN_TILE_SIZE = 4;
+const MIN_PARTICLE_SIZE = 1;
 const MAX_TILE_SIZE = 32;
 const MAX_BLOCKSET_SIZE = 512;
 const MAX_CUBE_SIZE = 1024;
@@ -23,6 +24,9 @@ const MIN_BRUSH_SIZE = 1;
 const MAX_BRUSH_SIZE = 64;
 const MAX_Z_BRUSH_RADIUS = 16;
 const HISTORY_LIMIT = 100;
+const MAX_PARTICLE_PREVIEW_COUNT = 500;
+const PARTICLE_PREVIEW_WIDTH = 480;
+const PARTICLE_PREVIEW_HEIGHT = 240;
 const TOUCH_DRAW_THRESHOLD_PX = 6;
 const PEN_PALM_REJECTION_MS = 800;
 const Pixel = {
@@ -31,13 +35,16 @@ const Pixel = {
   White: 2,
 };
 const BINARY_ASSET_MAGIC = [0x54, 0x47, 0x41, 0x53]; // TGAS
-const BINARY_ASSET_VERSION = 1;
+const BINARY_ASSET_VERSION_V1 = 1;
+const BINARY_ASSET_VERSION_V2 = 2;
 const BINARY_ASSET_HEADER_SIZE = 18;
+const BINARY_PARTICLE_DESCRIPTOR_SIZE = 8;
 const BINARY_ASSET_KIND = {
   tileset: 1,
   animation: 2,
   cube: 3,
   blockset: 4,
+  particles: 5,
 };
 const BINARY_KIND_ASSET = Object.fromEntries(Object.entries(BINARY_ASSET_KIND).map(([type, kind]) => [kind, type]));
 const BINARY_ASSET_VISIBLE = 0x01;
@@ -60,7 +67,18 @@ const CELL_NOUNS = {
   animation: "frame",
   cube: "slice",
   blockset: "layer",
+  particles: "frame",
 };
+const PARTICLE_PREVIEW_DEFAULTS = Object.freeze({
+  number: 40,
+  speed: 1,
+  driftX: 0,
+  driftY: 0,
+  movement: 12,
+  dirChange: 0.5,
+  xSize: 1,
+  ySize: 1,
+});
 
 const ICON_ATTRS = 'viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 const ICONS = {
@@ -114,6 +132,7 @@ const state = {
   screen: "gallery",
   assets: loadAssets(),
   activeAssetId: null,
+  activeParticle: 0,
   activeTile: 0,
   tool: "pen",
   color: Pixel.Black,
@@ -154,12 +173,19 @@ const state = {
   playing: false,
   playTimer: null,
   zoom: 1,
+  particlePreviewOpen: false,
 };
 
 const app = document.querySelector("#app");
 let galleryTimer = null;
 let previewTick = 0;
 let hoverPreviewId = null;
+let particlePreviewFrame = null;
+const particlePreviewSimulation = {
+  assetId: null,
+  instances: [],
+  lastTime: 0,
+};
 let activeCanvasPointerId = null;
 let activeCanvasPointerType = null;
 let penPalmRejectionUntil = 0;
@@ -287,6 +313,7 @@ function defaultAssets() {
   return [
     createTileset("basic_tiles", true),
     createAnimation("basic_anim", true),
+    createParticles("basic_particles", true),
     createCube("basic_cube", true),
     createBlockset("basic_blocks", true),
   ];
@@ -340,6 +367,60 @@ function createAnimation(name, withStarter = false) {
     frames,
     updatedAt: Date.now(),
   };
+}
+
+function createParticles(name, withStarter = false) {
+  const particles = [createParticle(DEFAULT_TILE_SIZE, DEFAULT_TILE_SIZE)];
+  if (withStarter) {
+    particles[0] = createParticle(9, 9, 4);
+    particles.push(createParticle(13, 7, 6));
+    drawStarterParticle(particles[0], "dot");
+    drawStarterParticle(particles[1], "dash");
+  }
+  return {
+    id: freshId(),
+    type: "particles",
+    name,
+    fps: DEFAULT_FPS,
+    particles,
+    preview: defaultParticlePreview(),
+    updatedAt: Date.now(),
+  };
+}
+
+function createParticle(width = DEFAULT_TILE_SIZE, height = DEFAULT_TILE_SIZE, frameCount = 1) {
+  const safeWidth = clampInt(width, MIN_PARTICLE_SIZE, MAX_TILE_SIZE);
+  const safeHeight = clampInt(height, MIN_PARTICLE_SIZE, MAX_TILE_SIZE);
+  const safeFrames = clampInt(frameCount, 1, 0xffff);
+  return {
+    id: freshParticleId(),
+    width: safeWidth,
+    height: safeHeight,
+    frames: Array.from({ length: safeFrames }, () => blankGrid(safeWidth, safeHeight)),
+  };
+}
+
+function drawStarterParticle(particle, mode) {
+  const centerX = (particle.width - 1) / 2;
+  const centerY = (particle.height - 1) / 2;
+  particle.frames.forEach((frame, frameIndex) => {
+    const t = particle.frames.length <= 1 ? 0 : frameIndex / (particle.frames.length - 1);
+    for (let y = 0; y < particle.height; y += 1) {
+      for (let x = 0; x < particle.width; x += 1) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        if (mode === "dot") {
+          const radius = 1 + Math.sin(t * Math.PI) * 2;
+          if (Math.hypot(dx, dy) <= radius) frame[indexFor(x, y, particle.width)] = Pixel.Black;
+        } else {
+          const offset = Math.round((t - 0.5) * 4);
+          if (Math.abs(dy - offset) <= 0.5 && Math.abs(dx) <= 4) {
+            frame[indexFor(x, y, particle.width)] = frameIndex % 2 ? Pixel.White : Pixel.Black;
+          }
+        }
+      }
+    }
+  });
 }
 
 function createCube(name, withStarter = false) {
@@ -396,6 +477,14 @@ function freshId() {
   return `asset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function freshParticleId() {
+  return `particle_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function defaultParticlePreview() {
+  return { ...PARTICLE_PREVIEW_DEFAULTS };
+}
+
 function blankGrid(width, height, fill = Pixel.Transparent) {
   return new Array(width * height).fill(fill);
 }
@@ -435,6 +524,7 @@ function loadAssets() {
 
 function normalizeAsset(asset) {
   if (!asset) return null;
+  if (asset.type === "particles") return normalizeParticles(asset);
   if (asset.type === "animation" || asset.type === "cube") return normalizeFramed(asset);
   if (asset.type === "blockset") return normalizeBlockset(asset);
   if (asset.type !== "tileset" || !Array.isArray(asset.tiles)) return null;
@@ -447,6 +537,46 @@ function normalizeAsset(asset) {
     tileSize,
     tiles: tiles.length ? tiles : [blankGrid(tileSize, tileSize)],
     updatedAt: Number(asset.updatedAt || Date.now()),
+  };
+}
+
+function normalizeParticles(asset) {
+  const source = Array.isArray(asset.particles) ? asset.particles.slice(0, 0xffff) : [];
+  const particles = source.map((particle) => {
+    const width = clampInt(particle?.width || DEFAULT_TILE_SIZE, MIN_PARTICLE_SIZE, MAX_TILE_SIZE);
+    const height = clampInt(particle?.height || DEFAULT_TILE_SIZE, MIN_PARTICLE_SIZE, MAX_TILE_SIZE);
+    const sourceFrames = Array.isArray(particle?.frames) ? particle.frames.slice(0, 0xffff) : [];
+    const frames = sourceFrames.map((frame) => normalizeGrid(frame, width, height));
+    return {
+      id: String(particle?.id || freshParticleId()),
+      width,
+      height,
+      frames: frames.length ? frames : [blankGrid(width, height)],
+    };
+  });
+  if (!particles.length) particles.push(createParticle());
+  return {
+    id: String(asset.id || freshId()),
+    type: "particles",
+    name: sanitizeName(asset.name || "particles"),
+    fps: clampInt(asset.fps || DEFAULT_FPS, MIN_FPS, MAX_FPS),
+    particles,
+    preview: normalizeParticlePreview(asset.preview),
+    updatedAt: Number(asset.updatedAt || Date.now()),
+  };
+}
+
+function normalizeParticlePreview(preview) {
+  const source = preview && typeof preview === "object" ? preview : {};
+  return {
+    number: clampInt(source.number ?? PARTICLE_PREVIEW_DEFAULTS.number, 0, MAX_PARTICLE_PREVIEW_COUNT),
+    speed: clampNumber(source.speed ?? PARTICLE_PREVIEW_DEFAULTS.speed, -8, 8),
+    driftX: clampNumber(source.driftX ?? PARTICLE_PREVIEW_DEFAULTS.driftX, -200, 200),
+    driftY: clampNumber(source.driftY ?? PARTICLE_PREVIEW_DEFAULTS.driftY, -200, 200),
+    movement: clampNumber(source.movement ?? PARTICLE_PREVIEW_DEFAULTS.movement, 0, 200),
+    dirChange: clampNumber(source.dirChange ?? PARTICLE_PREVIEW_DEFAULTS.dirChange, 0, 10),
+    xSize: clampNumber(source.xSize ?? PARTICLE_PREVIEW_DEFAULTS.xSize, 0.25, 8),
+    ySize: clampNumber(source.ySize ?? PARTICLE_PREVIEW_DEFAULTS.ySize, 0.25, 8),
   };
 }
 
@@ -530,6 +660,7 @@ function exportActiveAsset() {
 function encodeBinaryAsset(asset) {
   const kind = BINARY_ASSET_KIND[asset.type];
   if (!kind) throw new Error(`unsupported asset type ${asset.type}`);
+  if (asset.type === "particles") return encodeBinaryParticles(asset);
   const width = widthOf(asset);
   const height = heightOf(asset);
   const items = cellsOf(asset);
@@ -543,7 +674,7 @@ function encodeBinaryAsset(asset) {
   const bytes = new Uint8Array(byteLength);
   const view = new DataView(bytes.buffer);
   bytes.set(BINARY_ASSET_MAGIC, 0);
-  view.setUint16(4, BINARY_ASSET_VERSION, true);
+  view.setUint16(4, BINARY_ASSET_VERSION_V1, true);
   view.setUint8(6, kind);
   view.setUint8(7, 0);
   view.setUint16(8, width, true);
@@ -569,6 +700,61 @@ function encodeBinaryAsset(asset) {
   return bytes;
 }
 
+function encodeBinaryParticles(asset) {
+  const particles = Array.isArray(asset.particles) ? asset.particles : [];
+  if (!particles.length) throw new Error("particles asset has no particles");
+  if (particles.length > 0xffff) throw new Error("particle count is too large");
+  let cellBytes = 0;
+  for (const particle of particles) {
+    const width = Number(particle.width);
+    const height = Number(particle.height);
+    const frames = Array.isArray(particle.frames) ? particle.frames : [];
+    if (!Number.isInteger(width) || !Number.isInteger(height)
+      || width < MIN_PARTICLE_SIZE || height < MIN_PARTICLE_SIZE
+      || width > MAX_TILE_SIZE || height > MAX_TILE_SIZE || !frames.length || frames.length > 0xffff) {
+      throw new Error("particle dimensions or frame count are invalid");
+    }
+    const next = cellBytes + width * height * frames.length * 2;
+    if (!Number.isSafeInteger(next)) throw new Error("particles asset is too large");
+    cellBytes = next;
+  }
+  const byteLength = BINARY_ASSET_HEADER_SIZE
+    + particles.length * BINARY_PARTICLE_DESCRIPTOR_SIZE
+    + cellBytes;
+  const bytes = new Uint8Array(byteLength);
+  const view = new DataView(bytes.buffer);
+  bytes.set(BINARY_ASSET_MAGIC, 0);
+  view.setUint16(4, BINARY_ASSET_VERSION_V2, true);
+  view.setUint8(6, BINARY_ASSET_KIND.particles);
+  view.setUint8(7, 0);
+  view.setUint16(8, 0, true);
+  view.setUint16(10, 0, true);
+  view.setUint16(12, particles.length, true);
+  view.setUint16(14, clampInt(asset.fps, MIN_FPS, MAX_FPS), true);
+  view.setUint16(16, 0, true);
+
+  let descriptorOffset = BINARY_ASSET_HEADER_SIZE;
+  for (const particle of particles) {
+    view.setUint16(descriptorOffset, particle.width, true);
+    view.setUint16(descriptorOffset + 2, particle.height, true);
+    view.setUint16(descriptorOffset + 4, particle.frames.length, true);
+    view.setUint16(descriptorOffset + 6, 0, true);
+    descriptorOffset += BINARY_PARTICLE_DESCRIPTOR_SIZE;
+  }
+
+  let offset = descriptorOffset;
+  for (const particle of particles) {
+    const cellsPerFrame = particle.width * particle.height;
+    for (const frame of particle.frames) {
+      for (let i = 0; i < cellsPerFrame; i += 1) {
+        view.setUint16(offset, normalizePixel(frame[i]), true);
+        offset += 2;
+      }
+    }
+  }
+  return bytes;
+}
+
 function decodeBinaryAsset(bytes, name) {
   if (bytes instanceof ArrayBuffer) bytes = new Uint8Array(bytes);
   if (!(bytes instanceof Uint8Array)) throw new Error("asset bytes must be Uint8Array");
@@ -578,9 +764,10 @@ function decodeBinaryAsset(bytes, name) {
   }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = view.getUint16(4, true);
-  if (version !== BINARY_ASSET_VERSION) throw new Error(`unsupported asset version ${version}`);
+  if (version === BINARY_ASSET_VERSION_V2) return decodeBinaryParticles(bytes, view, name);
+  if (version !== BINARY_ASSET_VERSION_V1) throw new Error(`unsupported asset version ${version}`);
   const type = BINARY_KIND_ASSET[view.getUint8(6)];
-  if (!type) throw new Error(`unknown asset type ${view.getUint8(6)}`);
+  if (!type || type === "particles") throw new Error(`unknown asset type ${view.getUint8(6)}`);
   const width = view.getUint16(8, true);
   const height = view.getUint16(10, true);
   const count = view.getUint16(12, true);
@@ -640,26 +827,110 @@ function decodeBinaryAsset(bytes, name) {
   });
 }
 
+function decodeBinaryParticles(bytes, view, name) {
+  if (view.getUint8(6) !== BINARY_ASSET_KIND.particles) {
+    throw new Error(`asset version 2 does not support kind ${view.getUint8(6)}`);
+  }
+  if (view.getUint8(7) !== 0 || view.getUint16(8, true) !== 0 || view.getUint16(10, true) !== 0
+    || view.getUint16(16, true) !== 0) {
+    throw new Error("invalid particles asset header");
+  }
+  const particleCount = view.getUint16(12, true);
+  const fps = view.getUint16(14, true);
+  if (!particleCount) throw new Error("particles asset has no particles");
+  const cellsStart = BINARY_ASSET_HEADER_SIZE + particleCount * BINARY_PARTICLE_DESCRIPTOR_SIZE;
+  if (cellsStart > bytes.length) throw new Error("binary asset is truncated");
+
+  const descriptors = [];
+  let expected = cellsStart;
+  for (let i = 0; i < particleCount; i += 1) {
+    const descriptorOffset = BINARY_ASSET_HEADER_SIZE + i * BINARY_PARTICLE_DESCRIPTOR_SIZE;
+    const width = view.getUint16(descriptorOffset, true);
+    const height = view.getUint16(descriptorOffset + 2, true);
+    const frameCount = view.getUint16(descriptorOffset + 4, true);
+    const reserved = view.getUint16(descriptorOffset + 6, true);
+    if (!width || !height || width > MAX_TILE_SIZE || height > MAX_TILE_SIZE || !frameCount || reserved !== 0) {
+      throw new Error("invalid particle descriptor");
+    }
+    const nextExpected = expected + width * height * frameCount * 2;
+    if (!Number.isSafeInteger(nextExpected) || nextExpected > bytes.length) {
+      throw new Error("binary asset is truncated");
+    }
+    expected = nextExpected;
+    descriptors.push({ width, height, frameCount });
+  }
+  if (bytes.length !== expected) throw new Error("asset byte length does not match header");
+
+  let offset = cellsStart;
+  const particles = descriptors.map(({ width, height, frameCount }) => {
+    const frames = [];
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+      const frame = [];
+      for (let i = 0; i < width * height; i += 1) {
+        const pixel = view.getUint16(offset, true);
+        if (pixel > Pixel.White) throw new Error("invalid particle pixel");
+        frame.push(pixel);
+        offset += 2;
+      }
+      frames.push(frame);
+    }
+    return { id: freshParticleId(), width, height, frames };
+  });
+
+  return normalizeAsset({
+    id: freshId(),
+    type: "particles",
+    name: sanitizeName(name || "particles"),
+    fps: fps || DEFAULT_FPS,
+    particles,
+    preview: defaultParticlePreview(),
+    updatedAt: Date.now(),
+  });
+}
+
 /* ---------- Asset accessors ---------- */
 
 function cellsOf(asset) {
   if (asset.type === "tileset") return asset.tiles;
   if (asset.type === "blockset") return asset.layers;
+  if (asset.type === "particles") return selectedParticle(asset)?.frames || [];
   return asset.frames;
 }
 
 function setCellsOf(asset, cells) {
   if (asset.type === "tileset") asset.tiles = cells;
   else if (asset.type === "blockset") asset.layers = cells;
+  else if (asset.type === "particles") {
+    const particle = selectedParticle(asset);
+    if (particle) particle.frames = cells;
+  }
   else asset.frames = cells;
 }
 
 function widthOf(asset) {
+  if (asset.type === "particles") return selectedParticle(asset)?.width || DEFAULT_TILE_SIZE;
   return asset.type === "tileset" ? asset.tileSize : asset.width;
 }
 
 function heightOf(asset) {
+  if (asset.type === "particles") return selectedParticle(asset)?.height || DEFAULT_TILE_SIZE;
   return asset.type === "tileset" ? asset.tileSize : asset.height;
+}
+
+function selectedParticle(asset) {
+  if (!asset || asset.type !== "particles" || !asset.particles.length) return null;
+  const index = asset.id === state.activeAssetId
+    ? Math.max(0, Math.min(state.activeParticle, asset.particles.length - 1))
+    : 0;
+  return asset.particles[index];
+}
+
+function assetItemCount(asset) {
+  return asset.type === "particles" ? asset.particles.length : cellsOf(asset).length;
+}
+
+function assetItemNoun(asset) {
+  return asset.type === "particles" ? "particle" : cellNoun(asset);
 }
 
 function cellNoun(asset) {
@@ -667,10 +938,13 @@ function cellNoun(asset) {
 }
 
 function hasPlayback(asset) {
-  return asset.type === "animation" || asset.type === "cube";
+  return asset.type === "animation" || asset.type === "cube" || asset.type === "particles";
 }
 
 function hasGalleryAnimation(asset) {
+  if (asset.type === "particles") {
+    return asset.particles.length > 1 || asset.particles.some((particle) => particle.frames.length > 1);
+  }
   return (asset.type === "tileset" || hasPlayback(asset)) && cellsOf(asset).length > 1;
 }
 
@@ -723,6 +997,7 @@ function dispatch(action) {
     "toggleOnion",
     "toggleAllFrames",
     "setZoom",
+    "setParticlePreview",
   ];
   if (state.playing && !keepsPlayback.includes(action.type)) {
     stopPlayback();
@@ -731,6 +1006,7 @@ function dispatch(action) {
     case "openGallery":
       state.screen = "gallery";
       state.activeAssetId = null;
+      state.activeParticle = 0;
       state.status = "Local only";
       state.zoom = 1;
       resetHistory();
@@ -739,6 +1015,7 @@ function dispatch(action) {
       const creators = {
         tileset: createTileset,
         animation: createAnimation,
+        particles: createParticles,
         cube: createCube,
         blockset: createBlockset,
       };
@@ -747,6 +1024,7 @@ function dispatch(action) {
       const asset = create(name);
       state.assets = [asset, ...state.assets];
       state.activeAssetId = asset.id;
+      state.activeParticle = 0;
       state.activeTile = 0;
       state.screen = "editor";
       state.draftName = "new_asset";
@@ -779,6 +1057,7 @@ function dispatch(action) {
       break;
     case "openAsset":
       state.activeAssetId = action.id;
+      state.activeParticle = 0;
       state.activeTile = 0;
       state.screen = "editor";
       state.status = "Editing";
@@ -816,6 +1095,14 @@ function dispatch(action) {
         asset.fps = clampInt(action.fps, MIN_FPS, MAX_FPS);
         touch(asset);
         if (state.playing) startPlayback();
+      }
+      break;
+    }
+    case "setParticlePreview": {
+      const asset = activeAsset();
+      if (asset?.type === "particles" && Object.hasOwn(PARTICLE_PREVIEW_DEFAULTS, action.key)) {
+        asset.preview = normalizeParticlePreview({ ...asset.preview, [action.key]: action.value });
+        saveAssets();
       }
       break;
     }
@@ -935,6 +1222,69 @@ function dispatch(action) {
       state.activeTile = action.index;
       if (asset && asset.type === "blockset" && !asset.visibility[action.index]) {
         asset.visibility[action.index] = true;
+        touch(asset);
+      }
+      break;
+    }
+    case "selectParticle": {
+      const asset = activeAsset();
+      if (asset?.type === "particles") {
+        state.activeParticle = Math.max(0, Math.min(action.index, asset.particles.length - 1));
+        state.activeTile = 0;
+        state.selection = null;
+        state.zoom = 1;
+      }
+      break;
+    }
+    case "addParticle": {
+      const asset = activeAsset();
+      if (asset?.type === "particles" && asset.particles.length < 0xffff) {
+        pushHistory();
+        asset.particles.push(createParticle(widthOf(asset), heightOf(asset)));
+        resetParticlePreviewChoices(asset);
+        state.activeParticle = asset.particles.length - 1;
+        state.activeTile = 0;
+        state.selection = null;
+        state.zoom = 1;
+        touch(asset);
+      }
+      break;
+    }
+    case "duplicateParticle": {
+      const asset = activeAsset();
+      const source = asset?.type === "particles" ? selectedParticle(asset) : null;
+      if (asset?.type === "particles" && source && asset.particles.length < 0xffff) {
+        pushHistory();
+        const duplicate = {
+          id: freshParticleId(),
+          width: source.width,
+          height: source.height,
+          frames: source.frames.map((frame) => [...frame]),
+        };
+        asset.particles.splice(state.activeParticle + 1, 0, duplicate);
+        resetParticlePreviewChoices(asset);
+        state.activeParticle += 1;
+        state.activeTile = 0;
+        state.selection = null;
+        state.zoom = 1;
+        touch(asset);
+      }
+      break;
+    }
+    case "removeParticle": {
+      const asset = activeAsset();
+      if (asset?.type === "particles") {
+        if (asset.particles.length <= 1) {
+          state.flash = "A particles asset needs at least one particle";
+          break;
+        }
+        pushHistory();
+        asset.particles.splice(state.activeParticle, 1);
+        resetParticlePreviewChoices(asset);
+        state.activeParticle = Math.min(state.activeParticle, asset.particles.length - 1);
+        state.activeTile = 0;
+        state.selection = null;
+        state.zoom = 1;
         touch(asset);
       }
       break;
@@ -1066,6 +1416,18 @@ function resetHistory() {
 }
 
 function snapshotAsset(asset) {
+  if (asset.type === "particles") {
+    return {
+      particles: asset.particles.map((particle) => ({
+        id: particle.id,
+        width: particle.width,
+        height: particle.height,
+        frames: particle.frames.map((frame) => [...frame]),
+      })),
+      activeParticle: state.activeParticle,
+      activeTile: state.activeTile,
+    };
+  }
   return {
     width: widthOf(asset),
     height: heightOf(asset),
@@ -1089,6 +1451,19 @@ function applySnapshot(asset, snapshot) {
 }
 
 function restoreSnapshot(asset, snapshot) {
+  if (asset.type === "particles") {
+    asset.particles = snapshot.particles.map((particle) => ({
+      id: particle.id,
+      width: particle.width,
+      height: particle.height,
+      frames: particle.frames.map((frame) => [...frame]),
+    }));
+    state.activeParticle = Math.min(snapshot.activeParticle, asset.particles.length - 1);
+    state.activeTile = Math.min(snapshot.activeTile, selectedParticle(asset).frames.length - 1);
+    state.selection = null;
+    if (!canZoomAsset(asset)) state.zoom = 1;
+    return;
+  }
   const cells = snapshot.cells.map((cell) => [...cell]);
   if (asset.type === "tileset") {
     asset.tileSize = snapshot.width;
@@ -1151,8 +1526,9 @@ function playbackTick() {
 
 function resizeAsset(asset, requestedWidth, requestedHeight) {
   const maxSize = maxSizeForAsset(asset);
-  const nextWidth = clampInt(requestedWidth, MIN_TILE_SIZE, maxSize);
-  const nextHeight = clampInt(requestedHeight, MIN_TILE_SIZE, maxSize);
+  const minSize = minSizeForAsset(asset);
+  const nextWidth = clampInt(requestedWidth, minSize, maxSize);
+  const nextHeight = clampInt(requestedHeight, minSize, maxSize);
   const oldWidth = widthOf(asset);
   const oldHeight = heightOf(asset);
   if (nextWidth === oldWidth && nextHeight === oldHeight) return;
@@ -1168,6 +1544,10 @@ function resizeAsset(asset, requestedWidth, requestedHeight) {
   });
   if (asset.type === "tileset") {
     asset.tileSize = nextWidth;
+  } else if (asset.type === "particles") {
+    const particle = selectedParticle(asset);
+    particle.width = nextWidth;
+    particle.height = nextHeight;
   } else {
     asset.width = nextWidth;
     asset.height = nextHeight;
@@ -1202,6 +1582,7 @@ function render() {
   restoreDockScroll(scrollPositions);
   app.append(refreshButton());
   startGalleryPreviews();
+  startParticlePreview();
 }
 
 function captureDockScroll() {
@@ -1261,7 +1642,8 @@ function startGalleryPreviews() {
 function confirmOverlay() {
   const asset = state.assets.find((item) => item.id === state.pendingDelete);
   if (!asset) return null;
-  const count = cellsOf(asset).length;
+  const count = assetItemCount(asset);
+  const noun = assetItemNoun(asset);
   const overlay = document.createElement("div");
   overlay.className = "overlay";
   overlay.addEventListener("click", (event) => {
@@ -1273,7 +1655,7 @@ function confirmOverlay() {
   box.ariaLabel = `Delete ${asset.name}`;
   box.innerHTML = `
     <p class="confirm-title">Delete ${escapeHtml(asset.name)}?</p>
-    <p class="confirm-note">${asset.type} / ${count} ${cellNoun(asset)}${count === 1 ? "" : "s"} — this cannot be undone.</p>
+    <p class="confirm-note">${asset.type} / ${count} ${noun}${count === 1 ? "" : "s"} — this cannot be undone.</p>
   `;
   const row = document.createElement("div");
   row.className = "confirm-actions";
@@ -1288,10 +1670,12 @@ function confirmOverlay() {
 
 function topbar() {
   const asset = activeAsset();
-  const count = asset ? cellsOf(asset).length : 0;
-  const breadcrumb = asset
-    ? `${asset.name} / ${widthOf(asset)}x${heightOf(asset)} / ${count} ${cellNoun(asset)}${count === 1 ? "" : "s"}`
-    : state.status;
+  const count = asset ? assetItemCount(asset) : 0;
+  const breadcrumb = asset?.type === "particles"
+    ? `${asset.name} / particle ${state.activeParticle + 1} of ${count} / ${widthOf(asset)}x${heightOf(asset)} / ${cellsOf(asset).length} frame${cellsOf(asset).length === 1 ? "" : "s"}`
+    : asset
+      ? `${asset.name} / ${widthOf(asset)}x${heightOf(asset)} / ${count} ${cellNoun(asset)}${count === 1 ? "" : "s"}`
+      : state.status;
   let status = state.screen === "editor" ? (state.flash || breadcrumb) : state.status;
   if (state.screen === "gallery" && state.status === "Local only" && syncConfigured()) {
     const record = syncStateRecord();
@@ -1571,6 +1955,7 @@ function galleryScreen() {
     name,
     iconTextButton("Tileset", "plus", "btn primary", () => dispatch({ type: "createAsset", kind: "tileset" })),
     iconTextButton("Animation", "plus", "btn", () => dispatch({ type: "createAsset", kind: "animation" })),
+    iconTextButton("Particles", "plus", "btn", () => dispatch({ type: "createAsset", kind: "particles" })),
     iconTextButton("Cube", "plus", "btn", () => dispatch({ type: "createAsset", kind: "cube" })),
     iconTextButton("Blockset", "plus", "btn", () => dispatch({ type: "createAsset", kind: "blockset" })),
   );
@@ -1621,7 +2006,8 @@ function assetCard(asset) {
     });
   }
 
-  const count = cellsOf(asset).length;
+  const count = assetItemCount(asset);
+  const noun = assetItemNoun(asset);
   const meta = document.createElement("div");
   meta.className = "asset-meta";
   const unsynced = assetUnsynced(asset)
@@ -1630,7 +2016,7 @@ function assetCard(asset) {
   meta.innerHTML = `
     <div>
       <div class="asset-name">${unsynced}${escapeHtml(asset.name)}</div>
-      <div class="asset-kind">${count} ${cellNoun(asset)}${count === 1 ? "" : "s"}</div>
+      <div class="asset-kind">${count} ${noun}${count === 1 ? "" : "s"}</div>
     </div>
     <div class="asset-kind">${asset.type}</div>
   `;
@@ -1654,7 +2040,7 @@ function editorScreen() {
   if (!asset) return galleryScreen();
 
   const wrap = document.createElement("div");
-  wrap.className = "editor";
+  wrap.className = `editor${asset.type === "particles" ? " particles-editor" : ""}`;
 
   const head = document.createElement("div");
   head.className = "editor-head";
@@ -1672,17 +2058,20 @@ function editorScreen() {
     );
   } else {
     const maxSize = maxSizeForAsset(asset);
+    const minSize = minSizeForAsset(asset);
     sizeGroup.append(
-      stepperControl("W", asset.width, MIN_TILE_SIZE, maxSize, "Width", (value) =>
-        dispatch({ type: "resizeAsset", width: value, height: asset.height })),
-      stepperControl("H", asset.height, MIN_TILE_SIZE, maxSize, "Height", (value) =>
-        dispatch({ type: "resizeAsset", width: asset.width, height: value })),
+      stepperControl("W", widthOf(asset), minSize, maxSize, "Width", (value) =>
+        dispatch({ type: "resizeAsset", width: value, height: heightOf(asset) })),
+      stepperControl("H", heightOf(asset), minSize, maxSize, "Height", (value) =>
+        dispatch({ type: "resizeAsset", width: widthOf(asset), height: value })),
     );
   }
   if (canZoomAsset(asset)) sizeGroup.append(zoomControl(asset));
   sizeGroup.append(iconTextButton("Export", "download", "btn", () => exportActiveAsset()));
   head.append(rename, sizeGroup);
   wrap.append(head);
+
+  if (asset.type === "particles") wrap.append(particleList(asset));
 
   const canvasArea = document.createElement("div");
   canvasArea.className = "canvas-area";
@@ -1697,11 +2086,120 @@ function editorScreen() {
   canvasArea.append(canvas);
   wrap.append(canvasArea);
 
+  if (asset.type === "particles") wrap.append(particlePreviewPanel(asset));
+
   const dock = document.createElement("div");
   dock.className = "dock";
   dock.append(toolRow(asset), colorRow(asset), brushRow(asset), frameActions(asset), tileActions(asset), tileRow(asset));
   wrap.append(dock);
   return wrap;
+}
+
+function particleList(asset) {
+  const panel = document.createElement("section");
+  panel.className = "particle-list-panel";
+  const heading = document.createElement("div");
+  heading.className = "particle-list-heading";
+  heading.innerHTML = `<span>Particles</span><span>${asset.particles.length}</span>`;
+  const list = document.createElement("div");
+  list.className = "particle-list";
+  asset.particles.forEach((particle, index) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `particle-item${index === state.activeParticle ? " active" : ""}`;
+    item.ariaLabel = `Edit particle ${index + 1}, ${particle.width} by ${particle.height}, ${particle.frames.length} frames`;
+    item.addEventListener("click", () => dispatch({ type: "selectParticle", index }));
+    const canvas = document.createElement("canvas");
+    canvas.dataset.particleThumb = String(index);
+    const label = document.createElement("span");
+    label.innerHTML = `<b>${String(index + 1).padStart(2, "0")}</b><small>${particle.width}×${particle.height} · ${particle.frames.length}f</small>`;
+    item.append(canvas, label);
+    list.append(item);
+  });
+  const actions = document.createElement("div");
+  actions.className = "particle-list-actions";
+  const remove = iconButton("Delete selected particle", "trash", "icon-btn danger", () =>
+    dispatch({ type: "removeParticle" }));
+  remove.disabled = asset.particles.length <= 1;
+  actions.append(
+    iconTextButton("Add", "plus", "btn", () => dispatch({ type: "addParticle" })),
+    iconTextButton("Duplicate", "duplicate", "btn", () => dispatch({ type: "duplicateParticle" })),
+    remove,
+  );
+  panel.append(heading, list, actions);
+  return panel;
+}
+
+function particlePreviewPanel(asset) {
+  const details = document.createElement("details");
+  details.className = "particle-preview-panel";
+  details.open = state.particlePreviewOpen;
+  details.addEventListener("toggle", () => {
+    state.particlePreviewOpen = details.open;
+    if (details.open) startParticlePreview();
+    else stopParticlePreview();
+  });
+  const summary = document.createElement("summary");
+  summary.innerHTML = `<span>Particle preview</span><small>editor only</small>`;
+  const body = document.createElement("div");
+  body.className = "particle-preview-body";
+  const canvasWrap = document.createElement("div");
+  canvasWrap.className = "particle-preview-canvas-wrap";
+  const canvas = document.createElement("canvas");
+  canvas.className = "particle-preview-canvas";
+  canvas.width = PARTICLE_PREVIEW_WIDTH;
+  canvas.height = PARTICLE_PREVIEW_HEIGHT;
+  canvasWrap.append(canvas);
+  const controls = document.createElement("div");
+  controls.className = "particle-preview-controls";
+  const configs = [
+    { key: "number", label: "Number", min: 0, max: MAX_PARTICLE_PREVIEW_COUNT, step: 1 },
+    { key: "speed", label: "Animation speed", min: -8, max: 8, step: 0.1 },
+    { key: "driftX", label: "Drift X", min: -200, max: 200, step: 1, unit: "px/s" },
+    { key: "driftY", label: "Drift Y", min: -200, max: 200, step: 1, unit: "px/s" },
+    { key: "movement", label: "Movement", min: 0, max: 200, step: 1, unit: "px/s" },
+    { key: "dirChange", label: "Direction change", min: 0, max: 10, step: 0.1, unit: "/s" },
+    { key: "xSize", label: "X size", min: 0.25, max: 8, step: 0.25, unit: "×" },
+    { key: "ySize", label: "Y size", min: 0.25, max: 8, step: 0.25, unit: "×" },
+  ];
+  for (const config of configs) controls.append(particlePreviewControl(asset, config));
+  body.append(canvasWrap, controls);
+  details.append(summary, body);
+  return details;
+}
+
+function particlePreviewControl(asset, config) {
+  const label = document.createElement("label");
+  label.className = "particle-preview-control";
+  const text = document.createElement("span");
+  text.textContent = config.label;
+  const valueWrap = document.createElement("span");
+  valueWrap.className = "particle-preview-value";
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = String(config.min);
+  input.max = String(config.max);
+  input.step = String(config.step);
+  input.value = String(asset.preview[config.key]);
+  input.ariaLabel = config.label;
+  input.addEventListener("input", () => {
+    const value = config.key === "number"
+      ? clampInt(input.value, config.min, config.max)
+      : clampNumber(input.value, config.min, config.max);
+    asset.preview = normalizeParticlePreview({ ...asset.preview, [config.key]: value });
+    saveAssets();
+  });
+  input.addEventListener("change", () => {
+    input.value = String(asset.preview[config.key]);
+  });
+  valueWrap.append(input);
+  if (config.unit) {
+    const unit = document.createElement("small");
+    unit.textContent = config.unit;
+    valueWrap.append(unit);
+  }
+  label.append(text, valueWrap);
+  return label;
 }
 
 function stepperControl(label, value, min, max, description, apply) {
@@ -3573,6 +4071,17 @@ function drawCanvases(previewCell = null) {
     document.querySelectorAll("[data-tile-thumb]").forEach((canvas) => {
       drawGrid(canvas, width, height, cellsOf(asset)[Number(canvas.dataset.tileThumb)]);
     });
+    if (asset.type === "particles") {
+      document.querySelectorAll("[data-particle-thumb]").forEach((canvas) => {
+        const index = Number(canvas.dataset.particleThumb);
+        const particle = asset.particles[index];
+        if (!particle) return;
+        const frameIndex = index === state.activeParticle
+          ? Math.min(state.activeTile, particle.frames.length - 1)
+          : 0;
+        drawPreviewGrid(canvas, particle.width, particle.height, particle.frames[frameIndex]);
+      });
+    }
   }
   document.querySelectorAll("[data-preview-asset]").forEach((canvas) => {
     const previewAsset = state.assets.find((item) => item.id === canvas.dataset.previewAsset);
@@ -3582,6 +4091,12 @@ function drawCanvases(previewCell = null) {
 }
 
 function drawAssetPreview(canvas, asset, tick) {
+  if (asset.type === "particles") {
+    const particle = asset.particles[tick % asset.particles.length];
+    const frame = particle.frames[tick % particle.frames.length];
+    drawPreviewGrid(canvas, particle.width, particle.height, frame);
+    return;
+  }
   const frames = cellsOf(asset);
   const frameIndex = hasGalleryAnimation(asset) ? tick % frames.length : 0;
   const frame = frames[frameIndex];
@@ -3614,6 +4129,193 @@ function drawPreviewGrid(canvas, width, height, cells) {
       ctx.fillRect(x * scale, y * scale, scale, scale);
     }
   }
+}
+
+function startParticlePreview() {
+  stopParticlePreview();
+  const asset = activeAsset();
+  const canvas = document.querySelector(".particle-preview-canvas");
+  if (state.screen !== "editor" || asset?.type !== "particles" || !state.particlePreviewOpen || !canvas) return;
+  ensureParticlePreviewInstances(asset);
+  particlePreviewSimulation.lastTime = performance.now();
+  drawParticlePreview(canvas, asset);
+  particlePreviewFrame = requestAnimationFrame(particlePreviewTick);
+}
+
+function stopParticlePreview() {
+  if (particlePreviewFrame !== null) {
+    cancelAnimationFrame(particlePreviewFrame);
+    particlePreviewFrame = null;
+  }
+}
+
+function particlePreviewTick(now) {
+  particlePreviewFrame = null;
+  const asset = activeAsset();
+  const canvas = document.querySelector(".particle-preview-canvas");
+  if (state.screen !== "editor" || asset?.type !== "particles" || !state.particlePreviewOpen || !canvas) return;
+  ensureParticlePreviewInstances(asset);
+  const elapsed = (now - particlePreviewSimulation.lastTime) / 1000;
+  const dt = Math.max(0, Math.min(0.05, Number.isFinite(elapsed) ? elapsed : 0));
+  particlePreviewSimulation.lastTime = now;
+  updateParticlePreview(asset, dt);
+  drawParticlePreview(canvas, asset);
+  particlePreviewFrame = requestAnimationFrame(particlePreviewTick);
+}
+
+function ensureParticlePreviewInstances(asset) {
+  const simulation = particlePreviewSimulation;
+  if (simulation.assetId !== asset.id) {
+    simulation.assetId = asset.id;
+    simulation.instances = [];
+  }
+  const count = clampInt(asset.preview.number, 0, MAX_PARTICLE_PREVIEW_COUNT);
+  if (simulation.instances.length > count) simulation.instances.length = count;
+  while (simulation.instances.length < count) {
+    simulation.instances.push(createParticlePreviewInstance(asset, simulation.instances.length));
+  }
+  const ids = new Set(asset.particles.map((particle) => particle.id));
+  simulation.instances.forEach((instance, index) => {
+    if (!ids.has(instance.particleId)) {
+      instance.particleId = asset.particles[index % asset.particles.length].id;
+    }
+  });
+}
+
+function resetParticlePreviewChoices(asset) {
+  if (particlePreviewSimulation.assetId !== asset.id || !asset.particles.length) return;
+  for (const instance of particlePreviewSimulation.instances) {
+    const index = Math.floor(nextParticleRandom(instance) * asset.particles.length);
+    instance.particleId = asset.particles[index].id;
+  }
+}
+
+function createParticlePreviewInstance(asset, index) {
+  const instance = {
+    index,
+    randomState: hashString32(`${asset.id}:${index}`) || 0x9e3779b9,
+    particleId: asset.particles[0].id,
+    x: 0,
+    y: 0,
+    phase: 0,
+    directionFrom: 0,
+    directionTo: 0,
+    directionPhase: 0,
+    directionIndex: 1,
+  };
+  instance.particleId = asset.particles[Math.floor(nextParticleRandom(instance) * asset.particles.length)].id;
+  instance.x = nextParticleRandom(instance) * PARTICLE_PREVIEW_WIDTH;
+  instance.y = nextParticleRandom(instance) * PARTICLE_PREVIEW_HEIGHT;
+  instance.phase = nextParticleRandom(instance) * 32;
+  instance.directionFrom = nextParticleRandom(instance) * Math.PI * 2;
+  instance.directionTo = nextParticleRandom(instance) * Math.PI * 2;
+  instance.directionPhase = nextParticleRandom(instance);
+  return instance;
+}
+
+function updateParticlePreview(asset, dt) {
+  const config = asset.preview;
+  const directionRate = Math.max(0, config.dirChange);
+  for (const instance of particlePreviewSimulation.instances) {
+    const directionTotal = instance.directionPhase + dt * directionRate;
+    const crossings = Math.max(0, Math.floor(directionTotal));
+    instance.directionPhase = directionTotal - Math.floor(directionTotal);
+    for (let crossing = 0; crossing < crossings; crossing += 1) {
+      instance.directionFrom = instance.directionTo;
+      instance.directionTo = nextParticleRandom(instance) * Math.PI * 2;
+      instance.directionIndex += 1;
+    }
+    const directionT = instance.directionPhase * instance.directionPhase * (3 - 2 * instance.directionPhase);
+    const direction = instance.directionFrom
+      + shortestAngle(instance.directionFrom, instance.directionTo) * directionT;
+    const velocityX = config.driftX + Math.cos(direction) * config.movement;
+    const velocityY = config.driftY + Math.sin(direction) * config.movement;
+    instance.x = wrapNumber(instance.x + velocityX * dt, PARTICLE_PREVIEW_WIDTH);
+    instance.y = wrapNumber(instance.y + velocityY * dt, PARTICLE_PREVIEW_HEIGHT);
+    instance.phase += dt * asset.fps * config.speed;
+  }
+}
+
+function drawParticlePreview(canvas, asset) {
+  if (canvas.width !== PARTICLE_PREVIEW_WIDTH || canvas.height !== PARTICLE_PREVIEW_HEIGHT) {
+    canvas.width = PARTICLE_PREVIEW_WIDTH;
+    canvas.height = PARTICLE_PREVIEW_HEIGHT;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  drawParticlePreviewChecker(ctx, canvas.width, canvas.height);
+  for (const instance of particlePreviewSimulation.instances) {
+    let particle = asset.particles.find((candidate) => candidate.id === instance.particleId);
+    if (!particle) particle = asset.particles[instance.index % asset.particles.length];
+    const frameIndex = wrapInteger(Math.floor(instance.phase), particle.frames.length);
+    const frame = particle.frames[frameIndex];
+    const particleWidth = particle.width * asset.preview.xSize;
+    const particleHeight = particle.height * asset.preview.ySize;
+    const left = instance.x - particleWidth / 2;
+    const top = instance.y - particleHeight / 2;
+    for (const offsetY of [-canvas.height, 0, canvas.height]) {
+      for (const offsetX of [-canvas.width, 0, canvas.width]) {
+        const copyLeft = left + offsetX;
+        const copyTop = top + offsetY;
+        if (copyLeft >= canvas.width || copyTop >= canvas.height
+          || copyLeft + particleWidth <= 0 || copyTop + particleHeight <= 0) continue;
+        drawParticleFrame(ctx, particle, frame, copyLeft, copyTop, asset.preview.xSize, asset.preview.ySize);
+      }
+    }
+  }
+}
+
+function drawParticlePreviewChecker(ctx, width, height) {
+  const size = 12;
+  ctx.fillStyle = "#d7d5cb";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#c8c6bb";
+  for (let y = 0; y < height; y += size) {
+    for (let x = 0; x < width; x += size) {
+      if ((x / size + y / size) % 2 === 0) ctx.fillRect(x, y, size, size);
+    }
+  }
+}
+
+function drawParticleFrame(ctx, particle, frame, left, top, scaleX, scaleY) {
+  for (let y = 0; y < particle.height; y += 1) {
+    for (let x = 0; x < particle.width; x += 1) {
+      const pixel = frame[indexFor(x, y, particle.width)];
+      if (pixel === Pixel.Transparent) continue;
+      ctx.fillStyle = cssForPixel(pixel);
+      ctx.fillRect(left + x * scaleX, top + y * scaleY, scaleX, scaleY);
+    }
+  }
+}
+
+function shortestAngle(from, to) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function wrapNumber(value, extent) {
+  return ((value % extent) + extent) % extent;
+}
+
+function wrapInteger(value, extent) {
+  return ((value % extent) + extent) % extent;
+}
+
+function hashString32(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function nextParticleRandom(instance) {
+  let value = instance.randomState >>> 0;
+  value ^= value << 13;
+  value ^= value >>> 17;
+  value ^= value << 5;
+  instance.randomState = value >>> 0;
+  return instance.randomState / 0x100000000;
 }
 
 // 2x2 repeat of a cube slice so gallery previews show the seams looping.
@@ -3813,6 +4515,10 @@ function maxSizeForAsset(asset) {
   return maxSizeForType(asset?.type);
 }
 
+function minSizeForAsset(asset) {
+  return asset?.type === "particles" ? MIN_PARTICLE_SIZE : MIN_TILE_SIZE;
+}
+
 function canZoomAsset(asset) {
   return !!asset && (widthOf(asset) > 64 || heightOf(asset) > 64);
 }
@@ -3917,6 +4623,12 @@ function hash01(index) {
 
 function clampInt(value, min, max) {
   const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return min;
+  return Math.max(min, Math.min(max, number));
+}
+
+function clampNumber(value, min, max) {
+  const number = Number(value);
   if (!Number.isFinite(number)) return min;
   return Math.max(min, Math.min(max, number));
 }
