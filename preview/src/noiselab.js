@@ -553,78 +553,152 @@ const nlWang = {
   id: "wang",
   name: "Wang Tiles",
   assetTypes: ["tileset"],
-  blurb: "Dominoes for pictures: tiles are placed so touching edges match exactly, giving an endless non-repeating plane from a handful of drawings. Draw tiles whose edges agree and the seams disappear.",
+  blurb: "Dominoes for pictures: every tile is placed where its edges agree best with its neighbors (rotated and flipped copies count too), so a handful of drawings becomes an endless plane. Strict = smoothest seams, loose = more variety.",
   width: 320,
   height: 180,
   defaults: {
     cellsAcross: 10,
     scroll: 0.5,
+    variants: "rotflip",
+    strictness: 0.85,
     seed: 1,
   },
   controls: () => [
     ["slider", "cellsAcross", "Tiles across", 4, 24, 1],
     ["slider", "scroll", "Scroll speed", 0, 2, 0.05],
+    ["select", "variants", "Tile variants", [["rotflip", "rotations + flips"], ["rot", "rotations"], ["none", "originals only"]]],
+    ["slider", "strictness", "Edge strictness", 0, 1, 0.05],
     ["seed", "seed", "Seed"],
   ],
   init(rt) {
     const s = rt.settings;
     const asset = rt.asset;
     rt.grid = null;
-    rt.matchRate = 0;
+    rt.agreement = 0;
     if (!asset || !asset.tiles.length) return;
     const size = asset.tileSize;
-    const edge = (tile, side) => {
-      const cells = [];
-      for (let i = 0; i < size; i += 1) {
-        if (side === "top") cells.push(tile[i]);
-        else if (side === "bottom") cells.push(tile[(size - 1) * size + i]);
-        else if (side === "left") cells.push(tile[i * size]);
-        else cells.push(tile[i * size + size - 1]);
-      }
-      return cells.join(",");
+
+    // Expand tiles into placeable variants (rotations/flips), deduped so
+    // symmetric tiles don't flood the pool.
+    const variants = [];
+    const seen = new Set();
+    const push = (cells) => {
+      const key = cells.join(",");
+      if (seen.has(key)) return;
+      seen.add(key);
+      variants.push(cells);
     };
-    const edges = asset.tiles.map((tile) => ({
-      top: edge(tile, "top"),
-      bottom: edge(tile, "bottom"),
-      left: edge(tile, "left"),
-      right: edge(tile, "right"),
-    }));
-    // Grid is a torus 3x the visible width so scrolling loops seamlessly.
-    const gw = Math.max(8, s.cellsAcross * 3);
-    const gh = Math.max(6, Math.ceil((s.cellsAcross * this.height) / this.width) * 3);
-    const grid = new Array(gw * gh);
-    let matched = 0;
-    for (let y = 0; y < gh; y += 1) {
-      for (let x = 0; x < gw; x += 1) {
-        const leftTile = x > 0 ? grid[y * gw + x - 1] : null;
-        const topTile = y > 0 ? grid[(y - 1) * gw + x] : null;
-        const fits = (index) =>
-          (leftTile === null || edges[index].left === edges[leftTile].right)
-          && (topTile === null || edges[index].top === edges[topTile].bottom);
-        let candidates = [];
-        for (let i = 0; i < asset.tiles.length; i += 1) if (fits(i)) candidates.push(i);
-        let full = true;
-        if (!candidates.length) {
-          full = false;
-          for (let i = 0; i < asset.tiles.length; i += 1) {
-            if (leftTile === null || edges[i].left === edges[leftTile].right) candidates.push(i);
-          }
-          if (!candidates.length) candidates = asset.tiles.map((_, i) => i);
-        }
-        if (full) matched += 1;
-        grid[y * gw + x] = candidates[nlHash(s.seed, x, y, 71) % candidates.length];
+    for (const tile of asset.tiles) {
+      let current = tile;
+      for (let r = 0; r < 4; r += 1) {
+        push(current);
+        if (s.variants === "rotflip") push(nlFlipGrid(current, size));
+        if (s.variants === "none") break;
+        current = nlRotateGrid(current, size);
       }
     }
-    rt.grid = { cells: grid, gw, gh, size };
-    rt.matchRate = Math.round((matched / (gw * gh)) * 100);
+
+    // Edge value strips: -1 = transparent, else grayscale 0..1. Cost between
+    // touching edges is the mean per-cell difference (transparency mismatch
+    // counts as a full miss), so "how well do these seams agree" is graded,
+    // not exact-match-or-chaos.
+    const strip = (cells, side) => {
+      const out = new Float32Array(size);
+      for (let i = 0; i < size; i += 1) {
+        let cell;
+        if (side === 0) cell = cells[i]; // top
+        else if (side === 1) cell = cells[i * size + size - 1]; // right
+        else if (side === 2) cell = cells[(size - 1) * size + i]; // bottom
+        else cell = cells[i * size]; // left
+        out[i] = nlCellAlpha(cell) ? nlCellValue(cell) : -1;
+      }
+      return out;
+    };
+    const tops = variants.map((cells) => strip(cells, 0));
+    const rights = variants.map((cells) => strip(cells, 1));
+    const bottoms = variants.map((cells) => strip(cells, 2));
+    const lefts = variants.map((cells) => strip(cells, 3));
+    const edgeCost = (a, b) => {
+      let cost = 0;
+      for (let i = 0; i < size; i += 1) {
+        const va = a[i];
+        const vb = b[i];
+        if (va < 0 || vb < 0) cost += va === vb ? 0 : 1;
+        else cost += Math.abs(va - vb);
+      }
+      return cost / size;
+    };
+    const count = variants.length;
+    const rightCost = new Float32Array(count * count); // right edge of a vs left edge of b
+    const bottomCost = new Float32Array(count * count); // bottom edge of a vs top edge of b
+    for (let a = 0; a < count; a += 1) {
+      for (let b = 0; b < count; b += 1) {
+        rightCost[a * count + b] = edgeCost(rights[a], lefts[b]);
+        bottomCost[a * count + b] = edgeCost(bottoms[a], tops[b]);
+      }
+    }
+
+    // Torus grid 3x the visible width so scrolling loops seamlessly.
+    const gw = Math.max(8, s.cellsAcross * 3);
+    const gh = Math.max(6, Math.ceil((s.cellsAcross * this.height) / this.width) * 3);
+    const grid = new Int32Array(gw * gh);
+    const slack = (1 - s.strictness) * 0.5;
+    const pick = (x, y, sweep, useAll) => {
+      const leftIndex = grid[y * gw + nlWrapIndex(x - 1, gw)];
+      const topIndex = grid[nlWrapIndex(y - 1, gh) * gw + x];
+      const rightIndex = grid[y * gw + nlWrapIndex(x + 1, gw)];
+      const bottomIndex = grid[nlWrapIndex(y + 1, gh) * gw + x];
+      let best = Infinity;
+      const costs = new Float32Array(count);
+      for (let i = 0; i < count; i += 1) {
+        let cost = 0;
+        if (useAll || x > 0) cost += rightCost[leftIndex * count + i];
+        if (useAll || y > 0) cost += bottomCost[topIndex * count + i];
+        if (useAll) {
+          cost += rightCost[i * count + rightIndex];
+          cost += bottomCost[i * count + bottomIndex];
+        }
+        costs[i] = cost;
+        if (cost < best) best = cost;
+      }
+      // Deterministically pick among everything within `slack` of the best,
+      // so looseness buys variety instead of chaos.
+      const eligible = [];
+      for (let i = 0; i < count; i += 1) if (costs[i] <= best + slack * (useAll ? 2 : 1)) eligible.push(i);
+      return eligible[nlHash(s.seed, x + sweep * 8191, y, 71) % eligible.length];
+    };
+    for (let y = 0; y < gh; y += 1) {
+      for (let x = 0; x < gw; x += 1) {
+        grid[y * gw + x] = pick(x, y, 0, false);
+      }
+    }
+    // Two relaxation sweeps against all four neighbors (torus-wrapped): this
+    // smooths the scanline bias and heals the wrap seam.
+    for (let sweep = 1; sweep <= 2; sweep += 1) {
+      for (let y = 0; y < gh; y += 1) {
+        for (let x = 0; x < gw; x += 1) {
+          grid[y * gw + x] = pick(x, y, sweep, true);
+        }
+      }
+    }
+    // Report how well seams agree (0 cost = perfect) across the torus.
+    let total = 0;
+    for (let y = 0; y < gh; y += 1) {
+      for (let x = 0; x < gw; x += 1) {
+        const index = grid[y * gw + x];
+        total += rightCost[index * count + grid[y * gw + nlWrapIndex(x + 1, gw)]];
+        total += bottomCost[index * count + grid[nlWrapIndex(y + 1, gh) * gw + x]];
+      }
+    }
+    rt.agreement = Math.round((1 - total / (gw * gh * 2)) * 100);
+    rt.grid = { cells: grid, gw, gh, size, variants };
   },
   frame(rt) {
     const s = rt.settings;
-    const asset = rt.asset;
     const ctx = rt.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
-    if (!asset || !rt.grid) return;
-    const { cells, gw, gh, size } = rt.grid;
+    if (!rt.grid) return;
+    const { cells, gw, gh, size, variants } = rt.grid;
     const cellPx = this.width / s.cellsAcross;
     const offset = rt.t * s.scroll * cellPx;
     const cols = Math.ceil(this.width / cellPx) + 1;
@@ -635,13 +709,33 @@ const nlWang = {
       for (let x = 0; x < cols; x += 1) {
         const gx = nlWrapIndex(startCol + x, gw);
         const gy = nlWrapIndex(y, gh);
-        const tile = asset.tiles[cells[gy * gw + gx]];
+        const tile = variants[cells[gy * gw + gx]];
         nlDrawTileScaled(ctx, tile, size, Math.round(x * cellPx - subOffset), Math.round(y * cellPx), Math.ceil(cellPx));
       }
     }
-    rt.info = `${rt.matchRate}% of cells fully edge-matched — draw tiles with agreeing edges to raise it`;
+    rt.info = `${rt.grid.variants.length} placeable variants · ${rt.agreement}% edge agreement`;
   },
 };
+
+function nlRotateGrid(cells, size) {
+  const out = new Array(size * size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      out[x * size + (size - 1 - y)] = cells[y * size + x];
+    }
+  }
+  return out;
+}
+
+function nlFlipGrid(cells, size) {
+  const out = new Array(size * size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      out[y * size + (size - 1 - x)] = cells[y * size + x];
+    }
+  }
+  return out;
+}
 
 function nlDrawTileScaled(ctx, tile, size, dx, dy, drawSize) {
   const cellPx = drawSize / size;

@@ -1,4 +1,4 @@
-built_at=2026-07-13T09:08:09Z
+built_at=2026-07-13T17:10:48Z
 source_repo=/home/user/tinygrain/asset-editor
-source_commit=9b45ebc2a44b1ee7fc274f3ed638cef2c2d0066b
+source_commit=ea432d03c861c3f867e635ca29b89183808f6a87
 source_branch=noise_experiments
