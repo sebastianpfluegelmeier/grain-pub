@@ -553,7 +553,7 @@ const nlWang = {
   id: "wang",
   name: "Wang Tiles",
   assetTypes: ["tileset"],
-  blurb: "Dominoes for pictures: every tile is placed where its edges agree best with its neighbors (rotated and flipped copies count too), so a handful of drawings becomes an endless plane. Strict = smoothest seams, loose = more variety.",
+  blurb: "Dominoes for pictures: every tile is placed where its edges agree best with its neighbors (rotated and flipped copies count too), so a handful of drawings becomes an endless plane. Mutations keep swapping cells for other tiles that still fit, so the tiling stays coherent but never stops moving.",
   width: 320,
   height: 180,
   defaults: {
@@ -561,6 +561,7 @@ const nlWang = {
     scroll: 0.5,
     variants: "rotflip",
     strictness: 0.85,
+    mutate: 8,
     seed: 1,
   },
   controls: () => [
@@ -568,8 +569,10 @@ const nlWang = {
     ["slider", "scroll", "Scroll speed", 0, 2, 0.05],
     ["select", "variants", "Tile variants", [["rotflip", "rotations + flips"], ["rot", "rotations"], ["none", "originals only"]]],
     ["slider", "strictness", "Edge strictness", 0, 1, 0.05],
+    ["slider", "mutate", "Mutations / sec", 0, 60, 1],
     ["seed", "seed", "Seed"],
   ],
+  reinitKeys: ["cellsAcross", "variants", "strictness"],
   init(rt) {
     const s = rt.settings;
     const asset = rt.asset;
@@ -643,7 +646,11 @@ const nlWang = {
     const gh = Math.max(6, Math.ceil((s.cellsAcross * this.height) / this.width) * 3);
     const grid = new Int32Array(gw * gh);
     const slack = (1 - s.strictness) * 0.5;
-    const pick = (x, y, sweep, useAll) => {
+    const pick = (x, y, salt, useAll, exclude = -1) => {
+      // `exclude` (mutation swaps) demands a *different* tile: the current
+      // one doesn't compete at all, so the swap always animates — it takes
+      // the best-fitting alternative rather than re-electing the incumbent.
+      if (exclude >= 0 && count === 1) return exclude;
       const leftIndex = grid[y * gw + nlWrapIndex(x - 1, gw)];
       const topIndex = grid[nlWrapIndex(y - 1, gh) * gw + x];
       const rightIndex = grid[y * gw + nlWrapIndex(x + 1, gw)];
@@ -651,6 +658,10 @@ const nlWang = {
       let best = Infinity;
       const costs = new Float32Array(count);
       for (let i = 0; i < count; i += 1) {
+        if (i === exclude) {
+          costs[i] = Infinity;
+          continue;
+        }
         let cost = 0;
         if (useAll || x > 0) cost += rightCost[leftIndex * count + i];
         if (useAll || y > 0) cost += bottomCost[topIndex * count + i];
@@ -665,7 +676,7 @@ const nlWang = {
       // so looseness buys variety instead of chaos.
       const eligible = [];
       for (let i = 0; i < count; i += 1) if (costs[i] <= best + slack * (useAll ? 2 : 1)) eligible.push(i);
-      return eligible[nlHash(s.seed, x + sweep * 8191, y, 71) % eligible.length];
+      return eligible[nlHash(s.seed, x + salt * 8191, y, 71) % eligible.length];
     };
     for (let y = 0; y < gh; y += 1) {
       for (let x = 0; x < gw; x += 1) {
@@ -691,14 +702,29 @@ const nlWang = {
       }
     }
     rt.agreement = Math.round((1 - total / (gw * gh * 2)) * 100);
-    rt.grid = { cells: grid, gw, gh, size, variants };
+    rt.grid = { cells: grid, gw, gh, size, variants, pick };
+    rt.mutAcc = 0;
+    rt.mutCounter = 0;
   },
-  frame(rt) {
+  frame(rt, dt) {
     const s = rt.settings;
     const ctx = rt.ctx;
     ctx.clearRect(0, 0, this.width, this.height);
     if (!rt.grid) return;
-    const { cells, gw, gh, size, variants } = rt.grid;
+    const { cells, gw, gh, size, variants, pick } = rt.grid;
+    // Mutation: swap random cells for other tiles that still fit their four
+    // neighbors, so the plane animates without ever breaking coherence.
+    if (rt.playing && s.mutate > 0) {
+      rt.mutAcc += dt * s.mutate;
+      while (rt.mutAcc >= 1) {
+        rt.mutAcc -= 1;
+        rt.mutCounter += 1;
+        const h = nlHash(s.seed, rt.mutCounter, 977, 13);
+        const x = h % gw;
+        const y = nlHash(h, 5, 7, 11) % gh;
+        cells[y * gw + x] = pick(x, y, 4096 + rt.mutCounter, true, cells[y * gw + x]);
+      }
+    }
     const cellPx = this.width / s.cellsAcross;
     const offset = rt.t * s.scroll * cellPx;
     const cols = Math.ceil(this.width / cellPx) + 1;
@@ -1240,7 +1266,7 @@ function nlControl(exp, settings, spec) {
     nlSaveStore();
     if (!nlRt) return;
     nlRt.settings = settings;
-    if (forceInit || exp.reinitKeys?.includes(key) || exp.id === "wang" || exp.id === "rd" && key === "preset") {
+    if (forceInit || exp.reinitKeys?.includes(key) || (exp.id === "rd" && key === "preset")) {
       exp.init(nlRt);
     }
     nlRt.dirty = true;
