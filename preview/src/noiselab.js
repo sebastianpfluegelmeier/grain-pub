@@ -569,7 +569,7 @@ const nlWang = {
     ["slider", "scroll", "Scroll speed", 0, 2, 0.05],
     ["select", "variants", "Tile variants", [["rotflip", "rotations + flips"], ["rot", "rotations"], ["none", "originals only"]]],
     ["slider", "strictness", "Edge strictness", 0, 1, 0.05],
-    ["slider", "mutate", "Mutations / sec", 0, 60, 1],
+    ["slider", "mutate", "Mutations / sec", 0, 500, 1],
     ["seed", "seed", "Seed"],
   ],
   reinitKeys: ["cellsAcross", "variants", "strictness"],
