@@ -1,4 +1,4 @@
-built_at=2026-07-21T09:52:19Z
+built_at=2026-07-21T15:52:46Z
 source_repo=/home/user/tinygrain/asset-editor
-source_commit=0b614963727ebf974c9f3457be5aba5e8b73f3cd
+source_commit=1bfb5b2fce2b575b0f9560fa2f94e39151bf7add
 source_branch=claude/vector-animations-web-editor-l0bl1s

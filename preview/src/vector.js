@@ -31,16 +31,19 @@ function vecEase(type = "linear", strength = 0) {
   return { type, strength: clampNumber(strength, 0, 1) };
 }
 
+// `animated` is the stopwatch state. A non-animated track is a plain constant
+// (its single key is edited in place); editing it never creates keyframes.
+// Only once animation is enabled do value edits key at the playhead.
 function scalarTrack(v) {
-  return { keys: [{ t: 0, v, ease: vecEase() }] };
+  return { animated: false, keys: [{ t: 0, v, ease: vecEase() }] };
 }
 
 function pointTrack(x, y) {
-  return { keys: [{ t: 0, x, y, ease: vecEase(), spatial: "linear" }] };
+  return { animated: false, keys: [{ t: 0, x, y, ease: vecEase(), spatial: "linear" }] };
 }
 
 function boolTrack(v) {
-  return { keys: [{ t: 0, v: !!v }] };
+  return { animated: false, keys: [{ t: 0, v: !!v }] };
 }
 
 // Apply an easing curve to normalized segment progress u in [0, 1].
@@ -402,7 +405,39 @@ function normalizeVector(asset) {
     root: Array.isArray(asset.root) ? asset.root : [],
     updatedAt: asset.updatedAt || Date.now(),
   };
+  doc.root.forEach(migrateVectorNode);
   return doc;
+}
+
+// Back-fill the `animated` stopwatch flag on tracks loaded from older docs:
+// a track counts as animated if it already carries more than one keyframe.
+function migrateVectorTrack(track) {
+  if (track && Array.isArray(track.keys) && track.animated === undefined) {
+    track.animated = track.keys.length > 1;
+  }
+}
+
+function migrateVectorNode(node) {
+  if (!node) return;
+  migrateVectorTrack(node.visible);
+  if (node.node === "group") {
+    migrateVectorTrack(node.transform?.pos);
+    migrateVectorTrack(node.transform?.scale);
+    (node.children || []).forEach(migrateVectorNode);
+    return;
+  }
+  if (node.kind === "oval" || node.kind === "rect") {
+    migrateVectorTrack(node.pos);
+    migrateVectorTrack(node.size);
+    migrateVectorTrack(node.stroke);
+  } else if (node.kind === "line") {
+    migrateVectorTrack(node.a);
+    migrateVectorTrack(node.b);
+    migrateVectorTrack(node.stroke);
+  } else if (node.kind === "polygon") {
+    (node.verts || []).forEach(migrateVectorTrack);
+    migrateVectorTrack(node.stroke);
+  }
 }
 
 /* ==================== Editor state ==================== */
@@ -801,7 +836,22 @@ function vecPointerMove(event, asset) {
       vecPushHistory(asset);
       drag.pushed = true;
     }
-    for (const node of vecSelectedNodes(asset)) translateNode(node, dx, dy);
+    const selNodes = vecSelectedNodes(asset);
+    for (const node of selNodes) translateNode(node, dx, dy);
+    // Snap a single top-level shape's centre to the canvas centre.
+    vecState.snapX = false;
+    vecState.snapY = false;
+    if (selNodes.length === 1) {
+      const found = vecFindNode(asset, selNodes[0].id);
+      const b = found && !found.parent ? nodeBounds(sampleNode(found.node, vecState.time)) : null;
+      if (b) {
+        const tol = 6 / vecState.zoom;
+        const cx = (b.x0 + b.x1) / 2;
+        const cy = (b.y0 + b.y1) / 2;
+        if (Math.abs(cx - asset.width / 2) <= tol) { translateNode(found.node, asset.width / 2 - cx, 0); vecState.snapX = true; }
+        if (Math.abs(cy - asset.height / 2) <= tol) { translateNode(found.node, 0, asset.height / 2 - cy); vecState.snapY = true; }
+      }
+    }
     drag.lastX = p.x;
     drag.lastY = p.y;
     drawVectorStage(asset);
@@ -816,12 +866,12 @@ function vecPointerMove(event, asset) {
       vecPushHistory(asset);
       drag.pushed = true;
       if (node.kind === "oval" || node.kind === "rect") {
-        drag.posKey = ensureKeyAtTime(node, "pos", t);
-        drag.sizeKey = ensureKeyAtTime(node, "size", t);
+        drag.posKey = keyToEditRaw(asset, node, "pos");
+        drag.sizeKey = keyToEditRaw(asset, node, "size");
       } else if (node.kind === "line") {
-        drag.pKey = ensureKeyAtTime(node, drag.handle, t);
+        drag.pKey = keyToEditRaw(asset, node, drag.handle);
       } else {
-        drag.pKey = ensureKeyAtTime(node, `v${Number(drag.handle.slice(1))}`, t);
+        drag.pKey = keyToEditRaw(asset, node, `v${Number(drag.handle.slice(1))}`);
       }
     }
     if (node.kind === "oval" || node.kind === "rect") {
@@ -853,10 +903,14 @@ function vecPointerUp(event, asset) {
   // rebuild the overlay, or it would break the browser's dblclick pairing
   // (used for polygon vertex add/remove).
   if (drag.mode === "move") {
+    vecState.snapX = false;
+    vecState.snapY = false;
     if (drag.pushed) {
       asset.updatedAt = Date.now();
       saveAssets();
       render();
+    } else {
+      drawVectorStage(asset);
     }
     return;
   }
@@ -1031,14 +1085,8 @@ function vecUngroup(asset) {
 function vecToggleVisible(asset, id) {
   const found = vecFindNode(asset, id);
   if (!found) return;
-  const track = found.node.visible;
-  const t = snapT(asset, vecState.time);
-  const next = !evalBool(track, t);
-  vecEdit(asset, () => {
-    const i = findKeyAt(track, t);
-    if (i >= 0) track.keys[i].v = next;
-    else insertKeySorted(track, { t, v: next });
-  });
+  const next = !evalBool(found.node.visible, snapT(asset, vecState.time));
+  vecEdit(asset, () => (keyToEditRaw(asset, found.node, "visible").v = next));
 }
 
 /* ==================== Tracks & keyframes ==================== */
@@ -1114,35 +1162,56 @@ function newKeyFor(kind, t, sample) {
 }
 
 // Add a keyframe at the playhead capturing the current interpolated value.
+// Return the key object a value edit should target, respecting the stopwatch:
+// a constant track edits its single key; an animated track keys the playhead
+// (inserting one there if needed). Does not push history / save.
+function keyToEditRaw(asset, node, key) {
+  const track = resolveTrack(node, key);
+  const kind = trackKindFor(node, key);
+  if (!track.animated) return track.keys[0];
+  const t = snapT(asset, vecState.time);
+  let i = findKeyAt(track, t);
+  if (i < 0) {
+    insertKeySorted(track, newKeyFor(kind, t, sampleTrack(track, kind, t)));
+    i = findKeyAt(track, t);
+  }
+  return track.keys[i];
+}
+
+// Add an explicit keyframe at the playhead, enabling animation if needed.
 function vecAddKey(asset, node, key) {
   const kind = trackKindFor(node, key);
   const track = resolveTrack(node, key);
   const t = snapT(asset, vecState.time);
-  if (findKeyAt(track, t) >= 0) {
-    vecState.selKey = { nodeId: node.id, key, t };
-    render();
-    return;
-  }
   vecEdit(asset, () => {
-    insertKeySorted(track, newKeyFor(kind, t, sampleTrack(track, kind, t)));
+    track.animated = true;
+    if (findKeyAt(track, t) < 0) insertKeySorted(track, newKeyFor(kind, t, sampleTrack(track, kind, t)));
     vecState.selKey = { nodeId: node.id, key, t };
   });
 }
 
-// Set a value at the playhead, inserting a keyframe there if none exists
-// (auto-keying). `fields` is merged into the key.
-function vecSetValueAtTime(asset, node, key, fields) {
-  const kind = trackKindFor(node, key);
+// Stopwatch toggle: enable animation (seeding a key at the playhead) or
+// collapse back to a constant at the current value.
+function vecToggleAnimated(asset, node, key) {
   const track = resolveTrack(node, key);
+  const kind = trackKindFor(node, key);
   const t = snapT(asset, vecState.time);
   vecEdit(asset, () => {
-    let i = findKeyAt(track, t);
-    if (i < 0) {
-      insertKeySorted(track, newKeyFor(kind, t, sampleTrack(track, kind, t)));
-      i = findKeyAt(track, t);
+    if (track.animated) {
+      track.keys = [newKeyFor(kind, 0, sampleTrack(track, kind, t))];
+      track.animated = false;
+      vecState.selKey = null;
+    } else {
+      track.animated = true;
+      if (findKeyAt(track, t) < 0) insertKeySorted(track, newKeyFor(kind, t, sampleTrack(track, kind, t)));
     }
-    Object.assign(track.keys[i], fields);
   });
+}
+
+// Set a value at the playhead. A constant track edits in place; an animated
+// track keys at the playhead. `fields` is merged into the target key.
+function vecSetValueAtTime(asset, node, key, fields) {
+  vecEdit(asset, () => Object.assign(keyToEditRaw(asset, node, key), fields));
 }
 
 function vecMoveKey(asset, node, key, index, newT) {
@@ -1160,19 +1229,6 @@ function vecDeleteKey(asset, node, key, index) {
     track.keys.splice(index, 1);
     vecState.selKey = null;
   });
-}
-
-// Ensure a keyframe exists at time t (inserting from the current sample) and
-// return it. Caller is responsible for history/save.
-function ensureKeyAtTime(node, key, t) {
-  const kind = trackKindFor(node, key);
-  const track = resolveTrack(node, key);
-  let i = findKeyAt(track, t);
-  if (i < 0) {
-    insertKeySorted(track, newKeyFor(kind, t, sampleTrack(track, kind, t)));
-    i = findKeyAt(track, t);
-  }
-  return track.keys[i];
 }
 
 /* ==================== Handles & nested transforms ==================== */
@@ -1270,8 +1326,147 @@ function vecRenameNode(asset, id, name) {
 function vecSidePanels(asset) {
   const col = document.createElement("div");
   col.className = "vector-panels";
-  col.append(vecLayersPanel(asset), vecPropsPanel(asset));
+  col.append(vecLayersPanel(asset), vecArrangePanel(asset), vecPropsPanel(asset));
   return col;
+}
+
+/* ==================== Arrange / align ==================== */
+
+// Selected nodes that sit at the document root (alignment works in world
+// space, so it operates on top-level nodes — like the on-canvas handles).
+function vecSelectedTopLevel(asset) {
+  return vecState.selection
+    .map((id) => vecFindNode(asset, id))
+    .filter((f) => f && !f.parent)
+    .map((f) => f.node);
+}
+
+// World-space bounding box of a top-level node at the playhead.
+function vecWorldBounds(node) {
+  return nodeBounds(sampleNode(node, vecState.time));
+}
+
+function vecCenterInCanvas(asset, axis) {
+  const nodes = vecSelectedTopLevel(asset);
+  if (!nodes.length) return;
+  vecEdit(asset, () => {
+    for (const node of nodes) {
+      const b = vecWorldBounds(node);
+      if (!b) continue;
+      if (axis !== "v") translateNode(node, asset.width / 2 - (b.x0 + b.x1) / 2, 0);
+      if (axis !== "h") translateNode(node, 0, asset.height / 2 - (b.y0 + b.y1) / 2);
+    }
+  });
+}
+
+function vecAlign(asset, edge) {
+  const nodes = vecSelectedTopLevel(asset);
+  if (nodes.length < 2) return;
+  const items = nodes.map((n) => ({ n, b: vecWorldBounds(n) })).filter((o) => o.b);
+  if (items.length < 2) return;
+  const x0 = Math.min(...items.map((o) => o.b.x0));
+  const x1 = Math.max(...items.map((o) => o.b.x1));
+  const y0 = Math.min(...items.map((o) => o.b.y0));
+  const y1 = Math.max(...items.map((o) => o.b.y1));
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  vecEdit(asset, () => {
+    for (const { n, b } of items) {
+      if (edge === "left") translateNode(n, x0 - b.x0, 0);
+      else if (edge === "right") translateNode(n, x1 - b.x1, 0);
+      else if (edge === "cx") translateNode(n, cx - (b.x0 + b.x1) / 2, 0);
+      else if (edge === "top") translateNode(n, 0, y0 - b.y0);
+      else if (edge === "bottom") translateNode(n, 0, y1 - b.y1);
+      else if (edge === "cy") translateNode(n, 0, cy - (b.y0 + b.y1) / 2);
+    }
+  });
+}
+
+function vecDistribute(asset, axis) {
+  const nodes = vecSelectedTopLevel(asset);
+  if (nodes.length < 3) return;
+  const items = nodes.map((n) => ({ n, b: vecWorldBounds(n) })).filter((o) => o.b);
+  if (items.length < 3) return;
+  const center = (b) => (axis === "h" ? (b.x0 + b.x1) / 2 : (b.y0 + b.y1) / 2);
+  items.sort((a, b) => center(a.b) - center(b.b));
+  const first = center(items[0].b);
+  const step = (center(items[items.length - 1].b) - first) / (items.length - 1);
+  vecEdit(asset, () => {
+    items.forEach((o, i) => {
+      const d = first + step * i - center(o.b);
+      if (axis === "h") translateNode(o.n, d, 0);
+      else translateNode(o.n, 0, d);
+    });
+  });
+}
+
+function vecArrangePanel(asset) {
+  const panel = document.createElement("section");
+  panel.className = "vector-panel";
+  const head = document.createElement("div");
+  head.className = "vector-panel-head";
+  head.textContent = "Arrange";
+  panel.append(head);
+
+  const body = document.createElement("div");
+  body.className = "vector-arrange";
+  const count = vecSelectedTopLevel(asset).length;
+  if (!count) {
+    const hint = document.createElement("div");
+    hint.className = "vector-empty";
+    hint.textContent = "Select shapes to center or align.";
+    body.append(hint);
+    panel.append(body);
+    return panel;
+  }
+
+  const btn = (label, title, onClick, enabled = true) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn vector-arrange-btn";
+    b.textContent = label;
+    b.title = title;
+    b.disabled = !enabled;
+    b.addEventListener("click", onClick);
+    return b;
+  };
+
+  const canvasRow = document.createElement("div");
+  canvasRow.className = "vector-arrange-row";
+  canvasRow.append(
+    (() => { const l = document.createElement("span"); l.className = "vector-arrange-cap"; l.textContent = "Canvas"; return l; })(),
+    btn("↔", "Center horizontally in canvas", () => vecCenterInCanvas(asset, "h")),
+    btn("↕", "Center vertically in canvas", () => vecCenterInCanvas(asset, "v")),
+    btn("＋", "Center in canvas", () => vecCenterInCanvas(asset, "both")),
+  );
+  body.append(canvasRow);
+
+  const multi = count >= 2;
+  const alignRow = document.createElement("div");
+  alignRow.className = "vector-arrange-row";
+  alignRow.append(
+    (() => { const l = document.createElement("span"); l.className = "vector-arrange-cap"; l.textContent = "Align"; return l; })(),
+    btn("L", "Align left edges", () => vecAlign(asset, "left"), multi),
+    btn("C", "Align horizontal centers", () => vecAlign(asset, "cx"), multi),
+    btn("R", "Align right edges", () => vecAlign(asset, "right"), multi),
+    btn("T", "Align top edges", () => vecAlign(asset, "top"), multi),
+    btn("M", "Align middles (vertical centers)", () => vecAlign(asset, "cy"), multi),
+    btn("B", "Align bottom edges", () => vecAlign(asset, "bottom"), multi),
+  );
+  body.append(alignRow);
+
+  const canDist = count >= 3;
+  const distRow = document.createElement("div");
+  distRow.className = "vector-arrange-row";
+  distRow.append(
+    (() => { const l = document.createElement("span"); l.className = "vector-arrange-cap"; l.textContent = "Distribute"; return l; })(),
+    btn("↔", "Distribute horizontally", () => vecDistribute(asset, "h"), canDist),
+    btn("↕", "Distribute vertically", () => vecDistribute(asset, "v"), canDist),
+  );
+  body.append(distRow);
+
+  panel.append(body);
+  return panel;
 }
 
 function vecLayersPanel(asset) {
@@ -1380,51 +1575,103 @@ function vecPropsPanel(asset) {
   }
 
   const node = nodes[0];
-  const t = vecState.time;
-  // Fields read the value at the playhead and auto-key when edited.
-  const setPt = (key, axis) => (v) => vecSetValueAtTime(asset, node, key, { [axis]: v });
-  const setSc = (key) => (v) => vecSetValueAtTime(asset, node, key, { v });
-  const pt = (key) => evalPoint(resolveTrack(node, key), t);
-  const sc = (key) => evalScalar(resolveTrack(node, key), t);
-
-  if (node.node === "group") {
-    const tp = pt("tpos");
-    body.append(
-      vecNumberField("X", tp.x, setPt("tpos", "x")),
-      vecNumberField("Y", tp.y, setPt("tpos", "y")),
-      vecNumberField("Scale", sc("tscale"), setSc("tscale")),
-      vecOpSelect(asset, node),
-    );
-  } else if (node.kind === "oval" || node.kind === "rect") {
-    const pos = pt("pos");
-    const size = pt("size");
-    body.append(
-      vecNumberField("X", pos.x, setPt("pos", "x")),
-      vecNumberField("Y", pos.y, setPt("pos", "y")),
-      vecNumberField("W", size.x, setPt("size", "x")),
-      vecNumberField("H", size.y, setPt("size", "y")),
-      vecFillToggle(asset, node),
-      vecNumberField("Stroke", sc("stroke"), setSc("stroke")),
-    );
-  } else if (node.kind === "line") {
-    const a = pt("a");
-    const b = pt("b");
-    body.append(
-      vecNumberField("X1", a.x, setPt("a", "x")),
-      vecNumberField("Y1", a.y, setPt("a", "y")),
-      vecNumberField("X2", b.x, setPt("b", "x")),
-      vecNumberField("Y2", b.y, setPt("b", "y")),
-      vecNumberField("Width", sc("stroke"), setSc("stroke")),
-    );
-  } else {
-    const info = document.createElement("div");
-    info.className = "vector-empty";
-    info.textContent = `polygon · ${node.verts.length} points`;
-    body.append(info, vecFillToggle(asset, node),
-      vecNumberField("Stroke", sc("stroke"), setSc("stroke")));
-  }
+  // One row per animatable track: [stopwatch] label [value input(s)] [◆ nav].
+  for (const tr of nodeTracks(node)) body.append(vecTrackField(asset, node, tr));
+  // Non-animatable extras.
+  if (node.node === "shape" && node.kind !== "line") body.append(vecFillToggle(asset, node));
+  if (node.node === "group") body.append(vecOpSelect(asset, node));
   panel.append(body);
   return panel;
+}
+
+// Short axis labels per point track (Size reads W/H; positions read X/Y).
+function vecAxisLabels(key) {
+  return key === "size" ? ["W", "H"] : ["X", "Y"];
+}
+
+function vecTrackField(asset, node, tr) {
+  const row = document.createElement("div");
+  row.className = "vector-track-field";
+  const track = resolveTrack(node, tr.key);
+  const t = vecState.time;
+
+  row.append(vecStopwatch(asset, node, tr.key, track));
+  const name = document.createElement("span");
+  name.className = "vector-track-label";
+  name.textContent = tr.label;
+  row.append(name);
+
+  const inputs = document.createElement("div");
+  inputs.className = "vector-track-inputs";
+  if (tr.kind === "point") {
+    const p = evalPoint(track, t);
+    const [lx, ly] = vecAxisLabels(tr.key);
+    inputs.append(
+      vecMiniNum(lx, p.x, (v) => vecSetValueAtTime(asset, node, tr.key, { x: v })),
+      vecMiniNum(ly, p.y, (v) => vecSetValueAtTime(asset, node, tr.key, { y: v })),
+    );
+  } else if (tr.kind === "scalar") {
+    inputs.append(vecMiniNum("", evalScalar(track, t), (v) => vecSetValueAtTime(asset, node, tr.key, { v })));
+  } else {
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = evalBool(track, t);
+    cb.addEventListener("change", () => vecSetValueAtTime(asset, node, tr.key, { v: cb.checked }));
+    inputs.append(cb);
+  }
+  row.append(inputs);
+
+  if (track.animated) row.append(vecKeyNav(asset, node, tr.key, track));
+  return row;
+}
+
+function vecMiniNum(label, value, apply) {
+  const wrap = document.createElement("label");
+  wrap.className = "vector-mini-num";
+  if (label) {
+    const span = document.createElement("span");
+    span.textContent = label;
+    wrap.append(span);
+  }
+  const input = document.createElement("input");
+  input.type = "number";
+  input.value = Math.round(value * 100) / 100;
+  input.addEventListener("change", () => {
+    const v = Number(input.value);
+    if (Number.isFinite(v)) apply(v);
+  });
+  wrap.append(input);
+  return wrap;
+}
+
+// Stopwatch: ◇ = constant, ◆ = animated. Toggles animation for the track.
+function vecStopwatch(asset, node, key, track) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `vector-stopwatch${track.animated ? " on" : ""}`;
+  btn.textContent = track.animated ? "◆" : "◇";
+  btn.title = track.animated
+    ? "Animated — click to make this property constant"
+    : "Click to animate this property (adds a keyframe)";
+  btn.addEventListener("click", () => vecToggleAnimated(asset, node, key));
+  return btn;
+}
+
+// Keyframe navigator for an animated track: filled when the playhead sits on
+// a key (click removes it), hollow otherwise (click adds one here).
+function vecKeyNav(asset, node, key, track) {
+  const t = snapT(asset, vecState.time);
+  const idx = findKeyAt(track, t);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `vector-keynav${idx >= 0 ? " on" : ""}`;
+  btn.textContent = idx >= 0 ? "◆" : "◇";
+  btn.title = idx >= 0 ? "Keyframe here — click to remove" : "Add a keyframe at the playhead";
+  btn.addEventListener("click", () => {
+    if (idx >= 0) vecDeleteKey(asset, node, key, idx);
+    else vecAddKey(asset, node, key);
+  });
+  return btn;
 }
 
 function vecFillToggle(asset, node) {
@@ -1530,13 +1777,21 @@ function vecTimeline(asset) {
   rulerRow.append(rlabel, ruler);
   tl.append(rulerRow);
 
-  // Track rows for a single selected node.
+  // Track rows for a single selected node — only tracks with animation on.
   const nodes = vecSelectedNodes(asset);
   if (nodes.length === 1) {
-    const scroll = document.createElement("div");
-    scroll.className = "vector-tl-scroll";
-    for (const tr of nodeTracks(nodes[0])) scroll.append(vecTrackRow(asset, nodes[0], tr));
-    tl.append(scroll);
+    const animated = nodeTracks(nodes[0]).filter((tr) => resolveTrack(nodes[0], tr.key).animated);
+    if (animated.length) {
+      const scroll = document.createElement("div");
+      scroll.className = "vector-tl-scroll";
+      for (const tr of animated) scroll.append(vecTrackRow(asset, nodes[0], tr));
+      tl.append(scroll);
+    } else {
+      const hint = document.createElement("div");
+      hint.className = "vector-tl-hint";
+      hint.textContent = "No animated properties. Click a ◇ stopwatch in Properties to animate one.";
+      tl.append(hint);
+    }
   } else {
     const hint = document.createElement("div");
     hint.className = "vector-tl-hint";
@@ -1567,10 +1822,16 @@ function vecTrackRow(asset, node, tr) {
 
   const lane = document.createElement("div");
   lane.className = "vector-tl-lane";
+  // Clicking empty lane space scrubs (matches the ruler); keyframes are added
+  // explicitly via the + button or the Properties keyframe navigator.
   lane.addEventListener("pointerdown", (e) => {
     if (e.target !== lane) return;
-    vecState.time = snapT(asset, vecTimeFromX(e.clientX, lane.getBoundingClientRect(), asset));
-    vecAddKey(asset, node, tr.key);
+    vecStopPlay();
+    const rect = lane.getBoundingClientRect();
+    vecState.tlDrag = { mode: "scrub", rect };
+    vecState.time = snapT(asset, vecTimeFromX(e.clientX, rect, asset));
+    drawVectorStage(asset);
+    updatePlayheadDom(asset);
   });
 
   const track = resolveTrack(node, tr.key);
@@ -1611,7 +1872,7 @@ function vecKeyInspector(asset) {
   const found = sel && vecFindNode(asset, sel.nodeId);
   if (!sel || !found) {
     wrap.classList.add("muted");
-    wrap.textContent = "No keyframe selected — click a lane to add one, or a diamond to edit it.";
+    wrap.textContent = "No keyframe selected — click a diamond to edit its easing. Add keys with ◆ in Properties or the + on a track.";
     return wrap;
   }
   const node = found.node;
@@ -1794,6 +2055,26 @@ function drawVectorStage(asset) {
   const z = vecState.zoom;
   const octx = overlay.getContext("2d");
   octx.clearRect(0, 0, overlay.width, overlay.height);
+
+  // Center snap guides.
+  if (vecState.snapX || vecState.snapY) {
+    octx.strokeStyle = "#ff4ec8";
+    octx.lineWidth = 1;
+    if (vecState.snapX) {
+      const x = (asset.width / 2) * z + 0.5;
+      octx.beginPath();
+      octx.moveTo(x, 0);
+      octx.lineTo(x, overlay.height);
+      octx.stroke();
+    }
+    if (vecState.snapY) {
+      const y = (asset.height / 2) * z + 0.5;
+      octx.beginPath();
+      octx.moveTo(0, y);
+      octx.lineTo(overlay.width, y);
+      octx.stroke();
+    }
+  }
 
   // Selection outlines (mapped through any ancestor group transforms).
   octx.strokeStyle = "#4ea1ff";

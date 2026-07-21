@@ -118,26 +118,44 @@ drawn white on transparency.
 
 ### Timeline & keyframes
 
-Selecting a single shape shows its animatable tracks in the timeline
-(position, size / vertices, stroke, group transform, and visibility). Every
-parameter can be keyframed:
+Every property is a plain **constant** until you choose to animate it — so
+editing a value never creates keyframes by surprise. Each property in the
+Properties panel has a **stopwatch** (◇ constant, ◆ animated):
 
-- **Scrub** by dragging the ruler; **play/pause** loops the animation over the
-  asset's duration at the set FPS.
-- **Add a keyframe** with the ◆ button on a track, or by clicking anywhere in
-  a track lane; editing a value in the Properties panel while the playhead is
-  off a key **auto-keys** at the playhead.
+- Click the **stopwatch** to animate a property. It seeds a keyframe at the
+  playhead and the property appears in the timeline below. Click it again to
+  collapse the property back to a constant at its current value.
+- While a property is animated, editing its value (in Properties, by dragging
+  a handle, or moving the shape) sets a keyframe **at the playhead**. While it
+  is constant, the same edits just change the one value everywhere.
+- The **◆ keyframe navigator** next to an animated property is filled when the
+  playhead is on a key (click to remove it) and hollow otherwise (click to add
+  one). The **+** on a timeline track does the same.
+- **Scrub** by dragging the ruler *or clicking anywhere in a track lane*;
+  **play/pause** loops over the asset's duration at the set FPS.
 - **Drag** keyframe diamonds to retime them (snapped to the frame grid).
 - **Select** a keyframe to edit the segment leaving it: interpolation type
   (linear / ease-in / ease-out / ease-in-out) with an **ease-strength** slider
   (0 collapses to linear), and — for position and other point tracks — a
   **spatial path** toggle (linear polyline vs. a smooth spline through the
   waypoints). Temporal easing and spatial smoothing are set independently.
-- **Visibility** is a stepped on/off track; delete a keyframe with the
-  inspector's trash button or Delete/Backspace.
+- **Visibility** animates as a stepped on/off track; delete a selected
+  keyframe with the inspector's trash button or Delete/Backspace.
 
-Moving a shape on the canvas shifts its whole path (all keyframes) so it
-still reads as one object.
+Moving a *constant* shape on the canvas moves it (and any whole path) as one.
+
+### Arrange (center & align)
+
+The **Arrange** panel operates on the selected top-level shapes:
+
+- **Canvas** — center the selection horizontally (↔), vertically (↕), or both
+  (＋) within the canvas.
+- **Align** (two or more shapes) — left / center / right edges (L C R) and top
+  / middle / bottom edges (T M B), relative to the selection's bounding box.
+- **Distribute** (three or more) — even horizontal (↔) or vertical (↕) spacing.
+
+Dragging a single shape also **snaps its center to the canvas center**, with a
+magenta guide line when it locks on.
 
 ## TinyGrain runtime
 
