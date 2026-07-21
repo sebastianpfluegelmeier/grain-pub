@@ -70,6 +70,7 @@ const CELL_NOUNS = {
   cube: "slice",
   blockset: "layer",
   particles: "frame",
+  vector: "shape",
 };
 const PARTICLE_PREVIEW_DEFAULTS = Object.freeze({
   number: 40,
@@ -526,12 +527,13 @@ function loadAssets() {
 
 function normalizeAsset(asset) {
   if (!asset) return null;
+  if (asset.type === "vector") return normalizeVector(asset);
   if (asset.type === "particles") return normalizeParticles(asset);
   if (asset.type === "animation" || asset.type === "cube") return normalizeFramed(asset);
   if (asset.type === "blockset") return normalizeBlockset(asset);
   if (asset.type !== "tileset" || !Array.isArray(asset.tiles)) return null;
   const tileSize = clampInt(asset.tileSize || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, MAX_TILE_SIZE);
-  const tiles = asset.tiles.map((tile) => normalizeGrid(tile, tileSize, tileSize));
+  const tiles = asset.tiles.map((tile) => normalizeGrid(tile, tileSize, tileSize, true));
   return {
     id: String(asset.id || freshId()),
     type: "tileset",
@@ -587,7 +589,7 @@ function normalizeFramed(asset) {
   const width = clampInt(asset.width || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
   const height = clampInt(asset.height || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
   const source = Array.isArray(asset.frames) ? asset.frames : [];
-  const allowGray = asset.type === "cube";
+  const allowGray = supportsGrayscale(asset);
   const frames = source.map((frame) => normalizeGrid(frame, width, height, allowGray));
   return {
     id: String(asset.id || freshId()),
@@ -692,7 +694,7 @@ function encodeBinaryAsset(asset) {
     offset += 1;
   }
 
-  const allowGray = asset.type === "cube";
+  const allowGray = supportsGrayscale(asset);
   for (const cells of items) {
     for (let i = 0; i < cellsPerItem; i += 1) {
       view.setUint16(offset, normalizePixel(cells[i], allowGray), true);
@@ -928,10 +930,12 @@ function selectedParticle(asset) {
 }
 
 function assetItemCount(asset) {
+  if (asset.type === "vector") return asset.root.length;
   return asset.type === "particles" ? asset.particles.length : cellsOf(asset).length;
 }
 
 function assetItemNoun(asset) {
+  if (asset.type === "vector") return "shape";
   return asset.type === "particles" ? "particle" : cellNoun(asset);
 }
 
@@ -948,6 +952,10 @@ function hasGalleryAnimation(asset) {
     return asset.particles.length > 1 || asset.particles.some((particle) => particle.frames.length > 1);
   }
   return (asset.type === "tileset" || hasPlayback(asset)) && cellsOf(asset).length > 1;
+}
+
+function supportsGrayscale(asset) {
+  return asset?.type === "cube" || asset?.type === "tileset";
 }
 
 function wraps(asset) {
@@ -1027,6 +1035,7 @@ function dispatch(action) {
         particles: createParticles,
         cube: createCube,
         blockset: createBlockset,
+        vector: createVector,
       };
       const create = creators[action.kind] || createTileset;
       const name = uniqueName(sanitizeName(state.draftName || action.kind));
@@ -1374,7 +1383,7 @@ function dispatch(action) {
         break;
       }
       pushHistory();
-      const lerpGray = asset.type === "cube";
+      const lerpGray = supportsGrayscale(asset);
       for (let k = start + 1; k < end; k += 1) {
         const t = (k - start) / (end - start);
         frames[k] = frames[start].map((value, index) => {
@@ -1797,6 +1806,7 @@ function recordSyncState() {
 }
 
 function assetUnsynced(asset) {
+  if (asset.type === "vector") return false; // local-only: no binary format yet
   if (!syncConfigured()) return false;
   const record = syncStateRecord();
   if (!record) return true;
@@ -1835,14 +1845,16 @@ async function syncPush() {
   setSyncStatus("Pushing…", true);
   try {
     const remote = await GrainSync.listTree(token, owner, repo, SYNC_BRANCH);
-    const localPaths = new Set(state.assets.map(assetRemotePath));
+    // Vector assets have no binary format yet, so they stay local-only.
+    const syncable = state.assets.filter((asset) => asset.type !== "vector");
+    const localPaths = new Set(syncable.map(assetRemotePath));
     const deletes = (remote ? remote.tree : [])
       .filter((entry) =>
         entry.path.startsWith(SYNC_PREFIX)
         && (entry.path.endsWith(".grainasset") || entry.path.endsWith(".json")))
       .map((entry) => entry.path)
       .filter((path) => !localPaths.has(path));
-    const files = state.assets.map((asset) => ({
+    const files = syncable.map((asset) => ({
       path: assetRemotePath(asset),
       contentBytes: encodeBinaryAsset(asset),
     }));
@@ -1975,6 +1987,7 @@ function galleryScreen() {
     iconTextButton("Particles", "plus", "btn", () => dispatch({ type: "createAsset", kind: "particles" })),
     iconTextButton("Cube", "plus", "btn", () => dispatch({ type: "createAsset", kind: "cube" })),
     iconTextButton("Blockset", "plus", "btn", () => dispatch({ type: "createAsset", kind: "blockset" })),
+    iconTextButton("Vector", "plus", "btn", () => dispatch({ type: "createAsset", kind: "vector" })),
   );
   actions.append(createPanel);
   wrap.append(actions);
@@ -2055,6 +2068,7 @@ function assetCard(asset) {
 function editorScreen() {
   const asset = activeAsset();
   if (!asset) return galleryScreen();
+  if (asset.type === "vector") return vectorEditorScreen(asset);
 
   const wrap = document.createElement("div");
   wrap.className = `editor${asset.type === "particles" ? " particles-editor" : ""}`;
@@ -2318,7 +2332,7 @@ function brushRow(asset) {
   if (["z", "zsoft"].includes(paintScopeFor(asset)) && hasPlayback(asset)) {
     row.append(controlCluster("Z", zBrushControl(asset)));
   }
-  if (asset.type === "cube") {
+  if (supportsGrayscale(asset)) {
     row.append(controlCluster("Gray", grayRangeControl()));
     row.append(controlCluster("Alpha", opacityRangeControl()));
   }
@@ -2757,7 +2771,7 @@ function frameActions(asset) {
 function colorRow(asset) {
   const row = document.createElement("div");
   row.className = "color-row";
-  if (asset.type === "cube") {
+  if (supportsGrayscale(asset)) {
     const chip = button("", `gray-chip gray-chip-btn${state.color !== Pixel.Transparent ? " active" : ""}`, () =>
       dispatch({ type: "setColor", color: grayPixel(state.grayMin) }));
     chip.title = "Gray paint";
@@ -3428,7 +3442,7 @@ function paintPoint(asset, width, height, targets, x, y, gradient = null, motion
 
 function usesStrokeGradient(asset) {
   return (
-    asset?.type === "cube"
+    supportsGrayscale(asset)
     && usesGradientRangeMode()
     && !state.eraseStroke
     && state.color !== Pixel.Transparent
@@ -3626,7 +3640,7 @@ function strokePixelForCell(asset, x, y, width, height, target, current, options
   if (state.eraseStroke || state.color === Pixel.Transparent) {
     return targetPixelPass(target, x, y) ? Pixel.Transparent : current;
   }
-  if (asset.type !== "cube") {
+  if (!supportsGrayscale(asset)) {
     if (!targetPixelPass(target, x, y)) return current;
     if (options.noise) return Math.random() < 0.5 ? Pixel.Black : Pixel.White;
     return normalizePixel(state.color);
@@ -3677,8 +3691,8 @@ function applyPaintOpacity(level, current, opacity, options = {}) {
 }
 
 function blurredPixel(snapshot, width, height, x, y, wrap, asset, target, current) {
-  if (!targetPixelPass(target, x, y) && (asset.type !== "cube" || current === Pixel.Transparent)) return current;
-  if (asset.type === "cube") {
+  if (!targetPixelPass(target, x, y) && (!supportsGrayscale(asset) || current === Pixel.Transparent)) return current;
+  if (supportsGrayscale(asset)) {
     let sum = 0;
     let count = 0;
     for (let dy = -1; dy <= 1; dy += 1) {
@@ -4113,6 +4127,10 @@ function drawCanvases(previewCell = null) {
 }
 
 function drawAssetPreview(canvas, asset, tick) {
+  if (asset.type === "vector") {
+    drawVectorPreview(canvas, asset);
+    return;
+  }
   if (asset.type === "particles") {
     const particle = asset.particles[tick % asset.particles.length];
     const frame = particle.frames[tick % particle.frames.length];

@@ -7,7 +7,7 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
 
 ## Asset types
 
-- **Tileset** — square 1-bit tiles (black / white / transparent), N×N.
+- **Tileset** — square grayscale tiles (0–255 / transparent), N×N.
 - **Animation** — N×M frames with looping playback (play/pause, FPS stepper,
   space bar toggles).
 - **Particles** — a collection of independent black / white / transparent
@@ -27,6 +27,14 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
 - **Blockset** — one N×M image built from layers that composite in order.
   Select a layer to edit it; toggle per-layer visibility with the eye on
   each thumbnail.
+- **Vector** — white-on-transparent shape animations (oval, rectangle, line,
+  polygon) authored on a resolution-independent canvas and rasterized 1-bit
+  (no anti-aliasing — every pixel is fully white or fully transparent).
+  Shapes are groupable with boolean operations (union / intersect /
+  difference / xor) between grouped area shapes, and every parameter is
+  keyframe-animatable. There is no Grain runtime playback or binary export
+  yet — vector assets live in `localStorage` only, so git sync skips them.
+  See "Vector editor" below.
 
 ## Editing
 
@@ -37,8 +45,8 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   tile/frame/layer by a cell offset (wrapping on cubes). Right-click
   draws transparent (erase) with any tool.
 - Brush controls include size, square/round shape, active/visible/all
-  target scope, hard Z frame brush, and soft Z falloff brush. Cubes add
-  single/ranged grayscale and opacity controls with fixed, random,
+  target scope, hard Z frame brush, and soft Z falloff brush. Tilesets and
+  cubes add single/ranged grayscale and opacity controls with fixed, random,
   stroke-gradient, and radial modes.
 - Select tool: drag a rectangle, drag inside it to move the pixels,
   Cmd/Ctrl+C/X/V to copy/cut/paste (paste lands at the selection origin,
@@ -75,6 +83,62 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
 - Export: the editor header downloads the active asset as a binary
   `.grainasset` file for use from TinyGrain source.
 
+## Vector editor
+
+The **Vector** asset type is a small vector-animation authoring tool, separate
+from the raster pen tools. The canvas is 512×256 by default and everything is
+drawn white on transparency.
+
+- **Shapes:** oval (circle in a bounding box), rectangle, line, and polygon.
+  Area shapes (oval / rectangle / polygon) are filled by default with an
+  optional white stroke; lines are strokes with an adjustable width.
+- **Drawing:** pick a tool, then drag to place an oval / rectangle / line.
+  For polygons, click to drop vertices and press Enter (or click the first
+  vertex) to close; Escape cancels an in-progress polygon.
+- **Selecting & moving:** the select tool picks the top-most shape under the
+  cursor; dragging moves it (and its whole animation path) as one. A single
+  selected shape shows **direct-manipulation handles** — drag a box corner or
+  edge to resize an oval/rectangle, an endpoint to reshape a line, or a vertex
+  to move a polygon point (all handle edits auto-key at the playhead).
+  **Double-click** a polygon vertex to remove it, or an edge to add one.
+- **Layers panel** is a tree: groups can be expanded to select and edit their
+  children. Each row has per-shape visibility (eye), reordering within its
+  siblings, rename (double-click), and delete.
+- **Properties panel** edits the selected shape's parameters.
+- **Grouping & booleans:** select two or more shapes and Group them; a group
+  carries an animatable translate + uniform scale and a boolean operation
+  applied across its area children (lines pass through and draw on top).
+  **Ungroup** dissolves a group back into its parent, baking the group's base
+  offset into the children. On-canvas handles apply to top-level shapes; edit
+  grouped children through the timeline and Properties panel.
+- **Rendering** is 1-bit: shape coverage is thresholded so edges stay crisp
+  (nearest-neighbor), matching the rest of the editor's pixel-art look.
+- Undo/redo (buttons or Cmd/Ctrl+Z, Shift+Z / Ctrl+Y), duplicate
+  (Cmd/Ctrl+D), and delete (Delete/Backspace).
+
+### Timeline & keyframes
+
+Selecting a single shape shows its animatable tracks in the timeline
+(position, size / vertices, stroke, group transform, and visibility). Every
+parameter can be keyframed:
+
+- **Scrub** by dragging the ruler; **play/pause** loops the animation over the
+  asset's duration at the set FPS.
+- **Add a keyframe** with the ◆ button on a track, or by clicking anywhere in
+  a track lane; editing a value in the Properties panel while the playhead is
+  off a key **auto-keys** at the playhead.
+- **Drag** keyframe diamonds to retime them (snapped to the frame grid).
+- **Select** a keyframe to edit the segment leaving it: interpolation type
+  (linear / ease-in / ease-out / ease-in-out) with an **ease-strength** slider
+  (0 collapses to linear), and — for position and other point tracks — a
+  **spatial path** toggle (linear polyline vs. a smooth spline through the
+  waypoints). Temporal easing and spatial smoothing are set independently.
+- **Visibility** is a stepped on/off track; delete a keyframe with the
+  inspector's trash button or Delete/Backspace.
+
+Moving a shape on the canvas shifts its whole path (all keyframes) so it
+still reads as one object.
+
 ## TinyGrain runtime
 
 - `tileset("asset.grainasset", selector)` maps a normalized selector across
@@ -87,6 +151,17 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   movement: 0, dir_change: 0, x_size: 1, y_size: 1)` draws persistent,
   subpixel-positioned particle animations with directional drift plus a
   smoothly changing random movement heading.
+- `scatter("asset.grainasset", freq, t: 0, density: 1, jitter: 1, rot: "quarter",
+  scale: 1, scale_jitter: 0, blend: "over", drift: 0, seed: 0)` places drawn
+  stamps (particles/animation/tileset) on a deterministic hash grid — stamp
+  noise, pure in (u, v, t).
+- `wang("asset.grainasset", cells, variants: "rotflip", strictness: 0.85,
+  mutate: 0, luma: 0.5, luma_weight: 0, seed: 0)` tiles the plane with
+  edge-matched tiles; `mutate` (a field) swaps cells for other fitting
+  variants over time, `luma` steers selection toward a target brightness.
+- `octaves(source, octaves: 4, gain: 0.5, lacunarity: 2, blend: "avg", seed: 0)`
+  (and `octaves_wrap`) sums octave-scaled copies of any spatial value — or of
+  a per-octave factory `fn(o)` — with `blend` also accepting `fn(acc, layer)`.
 - `blockset("asset.grainasset", texture, threshold, u: 0.5, v: 0.5, x_scale: 1, y_scale: 1)`
   draws the asset centered at `(u, v)` at native pixel size and displays each
   block when the average texture value beneath its placed non-transparent
@@ -98,8 +173,9 @@ width/height/frame-count descriptor per particle, then each particle's frames
 as sequential little-endian `u16` cells. Binary import restores the artwork
 and shared FPS, and intentionally resets the editor-only preview controls.
 
-Run `node test-particles.mjs` to check the ragged particle binary round trip,
-strict validation, and continued TGAS v1 export for existing asset kinds.
+Run `node test-particles.mjs` to check ragged particle and grayscale tileset
+binary round trips, validation, and continued TGAS v1 export for existing
+asset kinds.
 
 ## Git sync
 
