@@ -1,0 +1,10 @@
+{
+  "name": "terrain-chess",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Terrain Chess prototype — a chess-inspired strategy game where movement comes from terrain, not pieces.",
+  "scripts": {
+    "test": "node test/rules.test.js"
+  }
+}

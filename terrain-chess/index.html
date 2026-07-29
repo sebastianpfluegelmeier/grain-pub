@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Terrain Chess</title>
+    <meta name="description" content="A chess-inspired strategy prototype where a piece's moves come from the terrain it stands on, not from the piece itself.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%237a5cff'/%3E%3Ctext x='16' y='24' font-size='22' text-anchor='middle' fill='white'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <h1>Terrain Chess <span aria-hidden="true">♞</span></h1>
+        <p>
+          Every piece is identical. A piece moves according to the
+          <em>terrain it is standing on</em> — and where it lands governs its
+          <em>next</em> move. Control the board, not the pieces.
+        </p>
+      </header>
+
+      <div class="layout">
+        <!-- Board ------------------------------------------------------ -->
+        <div class="board-area">
+          <div class="turnbar" id="turnbar"></div>
+          <div class="board-stage">
+            <div class="board" id="board"></div>
+            <svg class="rays" id="rays" viewBox="0 0 6 6" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+          <p class="hint" id="hint" style="margin-top:10px;"></p>
+        </div>
+
+        <!-- Controls --------------------------------------------------- -->
+        <div class="side">
+          <div class="panel">
+            <h2>Game</h2>
+            <div class="field">
+              <label class="cap">Mode</label>
+              <div class="seg" id="mode">
+                <button data-mode="1p">Single Player</button>
+                <button data-mode="2p">Two Players</button>
+                <button data-mode="ai">AI vs AI</button>
+              </div>
+            </div>
+            <div class="field" id="sideField">
+              <label class="cap">You play</label>
+              <div class="seg" id="humanSide">
+                <button data-side="W">White ●</button>
+                <button data-side="B">Black ○</button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="cap">Click behaviour</label>
+              <div class="seg" id="interact">
+                <button data-int="play">Play</button>
+                <button data-int="inspect">Inspect</button>
+              </div>
+            </div>
+            <div class="field row" id="aiControls" hidden>
+              <button class="btn" id="pauseBtn">Pause</button>
+              <button class="btn" id="stepBtn">Step ▸</button>
+            </div>
+            <div class="field row">
+              <button class="btn" id="undoBtn">Undo</button>
+              <button class="btn" id="restartBtn">Restart board</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Status</h2>
+            <div class="status" id="status"></div>
+          </div>
+
+          <div class="panel">
+            <h2>Board generator</h2>
+            <div class="field">
+              <label class="check"><input type="checkbox" id="optSymmetric" checked> Symmetric terrain (fair)</label>
+              <label class="check"><input type="checkbox" id="optWeighted" checked> Weighted distribution (rare queens)</label>
+              <label class="check"><input type="checkbox" id="optHeat"> Mobility heat-map</label>
+            </div>
+            <div class="field row">
+              <input type="number" id="seedInput" placeholder="seed" min="0" step="1">
+              <button class="btn" id="newSeedBtn">New board (seed)</button>
+              <button class="btn primary" id="randomBtn">Random board</button>
+            </div>
+            <div class="status" id="genInfo"></div>
+          </div>
+
+          <div class="panel" id="inspectPanel" hidden>
+            <h2>Inspect</h2>
+            <div class="inspect-info" id="inspectInfo"></div>
+          </div>
+
+          <div class="panel">
+            <h2>Terrain legend</h2>
+            <div class="legend" id="legend"></div>
+          </div>
+
+          <div class="panel">
+            <h2>Move log</h2>
+            <div class="log" id="log"></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="foot">
+        Prototype for the “movement comes from terrain” idea. Human moves are made
+        by selecting one of your discs, then a highlighted square. Sliding terrain
+        shows movement rays; <b>Inspect</b> reveals any tile's pattern regardless of
+        occupancy.
+      </p>
+    </div>
+
+    <script type="module" src="./src/ui.js"></script>
+  </body>
+</html>
