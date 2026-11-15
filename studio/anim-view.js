@@ -614,6 +614,13 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     remove,
     reload,
     overwrite,
+    // Closes the open animation, saving it first; false when the user keeps
+    // edits that could not be saved. Used when the file was deleted elsewhere.
+    async close() {
+      if (!await leaveOpen()) return false;
+      setOpen(null);
+      return true;
+    },
     status: () => ({dirty, saving: Boolean(savePromise), conflict, error: saveError}),
     destroy() {
       clearTimeout(saveTimer);

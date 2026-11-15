@@ -1,6 +1,7 @@
 /* The standalone animator page (index.html): the page frame, the header,
-   the storage note and the stacked layout for portrait screens. The editor's
-   own styles, including its touch sizes, are in ../anim-view.css. */
+   the sync control and its dialog, the storage note and the stacked layout
+   for portrait screens. The editor's own styles, including its touch sizes,
+   are in ../anim-view.css. */
 
 /* The page never scrolls or rubber-bands; the list, the details and the
    frame strip scroll inside. Pinch and double-tap zoom are off for the page
@@ -20,6 +21,30 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
 #animation-view { --anim-graph-column: minmax(240px, var(--anim-graph-width, 27%)); }
 .animator-import { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 12px; }
 .animator-import:hover { color: var(--text); border-bottom-color: var(--muted); background: transparent; }
+/* Dropbox sync: a symbol and a short status, in the muted mono of values. */
+.animator-sync { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; border: 0; color: var(--muted); background: transparent; font: 11px var(--mono); }
+.animator-sync:hover { color: var(--text); background: transparent; }
+.animator-sync .ui-icon { width: 16px; height: 16px; flex: none; }
+.animator-sync:is([data-state="auth"], [data-state="problem"]) { color: var(--error-text); }
+.animator-sync-dialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 16px 24px 24px; border: 1px dotted var(--line); background: var(--bg); }
+.animator-sync-dialog p { margin: 0 0 12px; line-height: 1.5; }
+.animator-sync-dialog [hidden] { display: none; }
+.animator-sync-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.animator-sync-head h2 { margin: 0; }
+.animator-sync-head button { display: inline-flex; padding: 6px; margin-right: -6px; color: var(--muted); }
+.animator-sync-head button:hover { color: var(--text); background: transparent; }
+.animator-sync-value { color: var(--text); font-family: var(--mono); font-size: 11px; text-transform: none; }
+.animator-sync-connect { display: inline-block; padding: 4px 0; border-bottom: 1px solid var(--muted); color: var(--text); font-size: 12px; text-decoration: none; }
+.animator-sync-connect:hover { border-bottom-color: var(--text); }
+.animator-sync-connect[aria-disabled="true"] { opacity: .4; pointer-events: none; }
+.animator-sync-code { display: flex; align-items: flex-end; gap: 12px; margin-top: 12px; }
+.animator-sync-code label { flex: 1; margin: 0; font-size: 12px; }
+.animator-sync-notes { margin: 0 0 12px; padding: 0; list-style: none; border-top: 1px dotted var(--line); }
+.animator-sync-notes li { padding: 8px 0; border-bottom: 1px dotted var(--line); color: var(--muted); font-size: 12px; line-height: 1.5; }
+.animator-sync-dialog .field-error { margin: 12px 0 0; color: var(--error-text); }
+.animator-sync-dialog .field-error:empty { display: none; }
+.animator-sync-dialog .dialog-actions { margin-top: 16px; }
+
 .animator-main { flex: 1; min-height: 0; height: auto; padding: 0 0 12px; }
 .animator-main #error { left: 0; bottom: 24px; }
 
@@ -31,6 +56,14 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
   .animator-header { height: 52px; }
   .animator-import { min-height: 44px; min-width: 44px; font-size: 14px; }
   .animator-header #theme-toggle { width: 44px; min-width: 44px; height: 44px; padding: 13px; }
+  .animator-sync { min-height: 44px; font-size: 12px; }
+  .animator-sync .ui-icon { width: 18px; height: 18px; }
+  .animator-sync-head button { width: 44px; height: 44px; padding: 13px; margin-right: -13px; }
+  .animator-sync-dialog p, .animator-sync-notes li { font-size: 13px; }
+  .animator-sync-value { font-size: 12px; }
+  .animator-sync-connect { display: inline-flex; align-items: center; min-height: 44px; padding: 0; border-bottom: 0; font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+  .animator-sync-code input { min-height: 40px; font-size: 16px; }
+  .animator-sync-code button, .animator-sync-dialog .dialog-actions button { min-height: 44px; font-size: 13px; }
   .animator-note p { font-size: 13px; }
   .animator-note button { min-height: 40px; font-size: 13px; border-bottom: 0; text-decoration: underline; text-underline-offset: 4px; }
 }
