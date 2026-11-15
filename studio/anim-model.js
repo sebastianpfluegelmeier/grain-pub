@@ -476,14 +476,20 @@ export function removeSwatch(doc, colour) {
 // - a loop on the node both arrives and leaves. The edge itself is listed only
 //   when it is a loop, where its own last frame comes before its first.
 // Bidirectional is ignored on loops, as the runtime does (2.1).
+//
+// Playback never passes from one edge to another that shares the node the
+// other way round: two edges that both start at it, or both end at it. Their
+// drawings next to the node still show the same pose, so they are listed
+// too, marked `shares: 'start'` or `shares: 'end'`, with their frames in the
+// order they lie away from the node.
 export function neighbourEdges(doc, edgeId) {
   const edge = needEdge(doc, edgeId), before = [], after = [];
   for (const other of doc.edges) {
-    const reverse = other.bidirectional && !isLoop(other) && other !== edge;
+    const apart = !isLoop(other) && other !== edge, backwards = () => other.frames.slice().reverse();
     if (other.to === edge.from) before.push({edge: other.id, reversed: false, frames: other.frames.slice()});
-    else if (reverse && other.from === edge.from) before.push({edge: other.id, reversed: true, frames: other.frames.slice().reverse()});
+    else if (apart && other.from === edge.from) before.push({edge: other.id, reversed: true, frames: backwards(), ...(other.bidirectional ? {} : {shares: 'start'})});
     if (other.from === edge.to) after.push({edge: other.id, reversed: false, frames: other.frames.slice()});
-    else if (reverse && other.to === edge.to) after.push({edge: other.id, reversed: true, frames: other.frames.slice().reverse()});
+    else if (apart && other.to === edge.to) after.push({edge: other.id, reversed: true, frames: backwards(), ...(other.bidirectional ? {} : {shares: 'end'})});
   }
   return {before, after};
 }
@@ -491,23 +497,23 @@ export function neighbourEdges(doc, edgeId) {
 // The onion ghosts around the frame at `index` of an edge: up to `count`
 // previous and `count` next frame ids. Past the start of the edge the
 // previous ghosts continue with the last frames of `before` (an entry of
-// neighbourEdges, or null for none); past its end the next ghosts continue
-// with the first frames of `after`. Returns [{id, side, distance}], where
-// side is 'previous' or 'next' and distance counts from 1.
+// neighbourEdges, a list of entries, or null for none); past its end the
+// next ghosts continue with the first frames of `after`. With several
+// entries every one of them gives its frame at each distance. Returns
+// [{id, side, distance}], where side is 'previous' or 'next' and distance
+// counts from 1; a frame is listed once per side, at its nearest distance.
 export function onionGhosts(doc, edgeId, index, {count = 1, before = null, after = null} = {}) {
   const frames = needEdge(doc, edgeId).frames, ghosts = [];
-  for (let distance = 1; distance <= count; distance++) {
-    const at = index - distance;
-    const id = at >= 0 ? frames[at] : before?.frames[before.frames.length + at];
-    if (id === undefined) break;
-    ghosts.push({id, side: 'previous', distance});
-  }
-  for (let distance = 1; distance <= count; distance++) {
-    const at = index + distance;
-    const id = at < frames.length ? frames[at] : after?.frames[at - frames.length];
-    if (id === undefined) break;
-    ghosts.push({id, side: 'next', distance});
-  }
+  const entries = value => value ? [].concat(value) : [];
+  const add = (side, own, others) => {
+    const seen = new Set();
+    for (let distance = 1; distance <= count; distance++) {
+      const ids = own(distance) !== undefined ? [own(distance)] : others(distance).filter(id => id !== undefined);
+      for (const id of ids) if (!seen.has(id)) { seen.add(id);ghosts.push({id, side, distance}); }
+    }
+  };
+  add('previous', distance => frames[index - distance], distance => entries(before).map(entry => entry.frames[entry.frames.length + index - distance]));
+  add('next', distance => frames[index + distance], distance => entries(after).map(entry => entry.frames[index + distance - frames.length]));
   return ghosts;
 }
 

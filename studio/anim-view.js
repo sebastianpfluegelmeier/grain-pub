@@ -101,10 +101,6 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   // selected frame in its play order. Selecting an edge makes it active;
   // selecting a state keeps the active edge, so drawing is not interrupted.
   let activeEdge = null, frameIndex = 0;
-  // When each edge was last changed through an edit that named it, for the
-  // onion skin's default neighbours. View state, not saved.
-  const edited = new Map();
-  let editSerial = 0;
   let dirty = false, editVersion = 0, saveTimer = null, savePromise = null, saveAgain = false, saveError = null, conflict = null;
   const listeners = new Set();
 
@@ -125,7 +121,6 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       const result = recordEdit(open.history, open.doc, change, options);
       if (result !== undefined) {
         const frames = new Set(options.frames ?? []);
-        for (const edge of open.doc.edges) if (edge.id === options.edge || edge.frames.some(id => frames.has(id))) edited.set(edge.id, ++editSerial);
         if (Number.isInteger(options.frameIndex)) frameIndex = options.frameIndex;
         changed('edit', {frames: [...frames]});
       }
@@ -162,12 +157,6 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       if (next === current.index) return;
       frameIndex = next;
       notify('frame');
-    },
-    // Of the edge ids given, the one edited most recently, or null.
-    lastEdited(ids) {
-      let best = null, serial = 0;
-      for (const id of ids) if ((edited.get(id) ?? 0) > serial) { best = id;serial = edited.get(id); }
-      return best;
     },
     // `listener({reason, doc, asset, selection, frame})` runs after open,
     // close, edit, undo, redo, reload, rename, select and frame. Edit events
@@ -283,7 +272,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   function setOpen(next, reason = next ? 'open' : 'close') {
     clearTimeout(saveTimer);saveTimer = null;
     open = next;dirty = false;conflict = null;saveError = null;editVersion++;selection = null;
-    activeEdge = null;frameIndex = 0;edited.clear();
+    activeEdge = null;frameIndex = 0;
     if (next) selectedKey = keyOf(next);
     renderList();renderDocument();notify(reason);status();
   }

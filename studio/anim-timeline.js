@@ -31,7 +31,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
 
   const onion = {on: false, count: 1};
   // The neighbouring edges picked for the onion skin, per edge: {before, after},
-  // each an edge id, or null for none. Missing means the default.
+  // each an edge id, or null for none. Missing means all of them.
   const choices = new Map();
   let playing = null, playEdge = null, drag = null;
   // While the graph preview runs, frames cannot be changed and the edge does
@@ -64,17 +64,17 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     const edge = activeEdge();
     return edge ? neighbourEdges(doc(), edge.id) : {before: [], after: []};
   }
-  // The neighbour picked for one side: the user's choice while it still
-  // exists, otherwise the most recently edited candidate, otherwise the first.
+  // The neighbours ghosted on one side, as a list: every edge at that state
+  // unless the user picked one (while it still exists) or none. All of them
+  // meet in the same pose, so together they show where the drawings disagree,
+  // and the ghosts do not change with what was edited last.
   function chosen(side, list = neighbours()[side]) {
     const edge = activeEdge();
-    if (!edge || !list.length) return null;
+    if (!edge) return [];
     const stored = choices.get(edge.id)?.[side];
-    if (stored === null) return null;
+    if (stored === null) return [];
     const found = stored !== undefined && list.find(entry => entry.edge === stored);
-    if (found) return found;
-    const recent = session.lastEdited(list.map(entry => entry.edge));
-    return list.find(entry => entry.edge === recent) ?? list[0];
+    return found ? [found] : list;
   }
   function ghosts() {
     const f = frame();
@@ -154,6 +154,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     const d = doc(), edge = edgeById(d, entry.edge), name = id => text(nodeById(d, id)?.name ?? '');
     if (!edge) return '';
     if (isLoop(edge)) return `loop on <span class="anim-name">${name(edge.from)}</span>`;
+    if (entry.shares) return `<span class="anim-name">${name(edge.from)}</span> → <span class="anim-name">${name(edge.to)}</span>, its ${entry.shares}`;
     return entry.reversed ? `<span class="anim-name">${name(edge.to)}</span> → <span class="anim-name">${name(edge.from)}</span>, backwards`
       : `<span class="anim-name">${name(edge.from)}</span> → <span class="anim-name">${name(edge.to)}</span>`;
   }
@@ -164,10 +165,12 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
   }
   function menu(side, list) {
     const pick = chosen(side, list), labels = optionLabels(list);
-    const title = side === 'before' ? 'The edge whose last frames are ghosted before the first frame' : 'The edge whose first frames are ghosted after the last frame';
+    const title = side === 'before' ? 'The edges at the start state whose nearest frames are ghosted before the first frame' : 'The edges at the end state whose nearest frames are ghosted after the last frame';
+    const one = pick.length === 1 && list.length > 1 ? pick[0].edge : null, all = pick.length > 0 && one === null;
     return `<label class="anim-onion-choice" title="${title}">${side === 'before' ? 'Before' : 'After'}<select data-onion-${side} ${list.length ? '' : 'disabled'}>
-      <option value="none" ${pick ? '' : 'selected'}>none</option>
-      ${list.map((entry, index) => `<option value="${entry.edge}" ${pick?.edge === entry.edge ? 'selected' : ''}>${text(labels[index])}</option>`).join('')}
+      <option value="none" ${pick.length ? '' : 'selected'}>none</option>
+      ${list.length > 1 ? `<option value="all" ${all ? 'selected' : ''}>all</option>` : ''}
+      ${list.map((entry, index) => `<option value="${entry.edge}" ${one === entry.edge || (all && list.length === 1) ? 'selected' : ''}>${text(labels[index])}</option>`).join('')}
     </select></label>`;
   }
   function render() {
@@ -279,7 +282,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     if (input.matches('[data-fps]')) {
       try { session.edit(d => setFps(d, Number(input.value))); } catch (error) { input.value = String(doc().fps);onError(error); }
     } else if (input.matches('[data-onion-count]')) setOnion({count: Number(input.value)});
-    else if (input.matches('[data-onion-before],[data-onion-after]')) choose(input.matches('[data-onion-before]') ? 'before' : 'after', input.value === 'none' ? null : Number(input.value));
+    else if (input.matches('[data-onion-before],[data-onion-after]')) choose(input.matches('[data-onion-before]') ? 'before' : 'after', input.value === 'none' ? null : input.value === 'all' ? undefined : Number(input.value));
   });
   // A press selects; dragging past a few pixels reorders. The listeners for
   // the drag sit on the document, so leaving the strip does not end it. A
