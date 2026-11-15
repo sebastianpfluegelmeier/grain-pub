@@ -7,7 +7,7 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
 
 ## Asset types
 
-- **Tileset** — square 1-bit tiles (black / white / transparent), N×N.
+- **Tileset** — square grayscale tiles (0–255 / transparent), N×N.
 - **Animation** — N×M frames with looping playback (play/pause, FPS stepper,
   space bar toggles).
 - **Particles** — a collection of independent black / white / transparent
@@ -37,8 +37,8 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   tile/frame/layer by a cell offset (wrapping on cubes). Right-click
   draws transparent (erase) with any tool.
 - Brush controls include size, square/round shape, active/visible/all
-  target scope, hard Z frame brush, and soft Z falloff brush. Cubes add
-  single/ranged grayscale and opacity controls with fixed, random,
+  target scope, hard Z frame brush, and soft Z falloff brush. Tilesets and
+  cubes add single/ranged grayscale and opacity controls with fixed, random,
   stroke-gradient, and radial modes.
 - Select tool: drag a rectangle, drag inside it to move the pixels,
   Cmd/Ctrl+C/X/V to copy/cut/paste (paste lands at the selection origin,
@@ -87,6 +87,17 @@ GitHub repo. The editor exports runtime assets as TinyGrain binary
   movement: 0, dir_change: 0, x_size: 1, y_size: 1)` draws persistent,
   subpixel-positioned particle animations with directional drift plus a
   smoothly changing random movement heading.
+- `scatter("asset.grainasset", freq, t: 0, density: 1, jitter: 1, rot: "quarter",
+  scale: 1, scale_jitter: 0, blend: "over", drift: 0, seed: 0)` places drawn
+  stamps (particles/animation/tileset) on a deterministic hash grid — stamp
+  noise, pure in (u, v, t).
+- `wang("asset.grainasset", cells, variants: "rotflip", strictness: 0.85,
+  mutate: 0, luma: 0.5, luma_weight: 0, seed: 0)` tiles the plane with
+  edge-matched tiles; `mutate` (a field) swaps cells for other fitting
+  variants over time, `luma` steers selection toward a target brightness.
+- `octaves(source, octaves: 4, gain: 0.5, lacunarity: 2, blend: "avg", seed: 0)`
+  (and `octaves_wrap`) sums octave-scaled copies of any spatial value — or of
+  a per-octave factory `fn(o)` — with `blend` also accepting `fn(acc, layer)`.
 - `blockset("asset.grainasset", texture, threshold, u: 0.5, v: 0.5, x_scale: 1, y_scale: 1)`
   draws the asset centered at `(u, v)` at native pixel size and displays each
   block when the average texture value beneath its placed non-transparent
@@ -98,8 +109,10 @@ width/height/frame-count descriptor per particle, then each particle's frames
 as sequential little-endian `u16` cells. Binary import restores the artwork
 and shared FPS, and intentionally resets the editor-only preview controls.
 
-Run `node test-particles.mjs` to check the ragged particle binary round trip,
-strict validation, and continued TGAS v1 export for existing asset kinds.
+Run `node test-particles.mjs` to check ragged particle and grayscale tileset
+binary round trips, validation, and continued TGAS v1 export for existing
+asset kinds. Run `node test-sync.mjs` to check Git sync conflict handling,
+per-asset sync status, and edits made while a push or pull is in flight.
 
 ## Git sync
 
@@ -118,10 +131,44 @@ Client-side only, ported from grain's
 `grain-web-app/src/github-sync.js`: supply a fine-grained personal access
 token with `contents: read/write` on that one repo. Push is a single
 commit (adds, updates and deletions, including removal of old synced JSON
-files); pull is remote-wins by asset name.
-When configured, the editor pulls once on startup, gallery cards show a
-yellow dot on assets modified since the last sync, and the topbar shows
-the last sync time.
+files). Pull updates unchanged assets and adds new remote assets. Locally edited
+assets are preserved; the sync status reports conflicts, and Push publishes the
+local versions. Sync tracks the content of each asset separately, so local-only
+assets and edits made during a network request remain unsynced.
+When configured, the editor pulls once on startup. Gallery cards show a yellow
+dot on unsynced assets, and the topbar shows the last sync time. Older sync
+records without per-asset versions are treated as unsynced until the next push
+or a pull confirms identical content.
+
+## Noise Lab (experimental)
+
+The gallery topbar's **Noise Lab** opens a playground of semi-procedural
+noise experiments that consume the assets you draw — authored marks,
+rule-driven placement and time. Everything is preview-only: assets are
+read, never written, and Lab settings persist under their own
+`grain.noiselab.v1` localStorage key.
+
+- **Scatter** — stamp noise: deterministic hash-grid placement of drawn
+  stamps (particles/animation/tileset) with density maps, jitter,
+  rotation, blend modes, drift, and fbm octaves.
+- **Cube FBM** — a cube asset summed in octaves like fbm, with optional
+  trilinear "smooth" sampling and time/perlin-driven z.
+- **Wang Tiles** — edge-matched aperiodic tiling of a tileset; reports
+  how much of the plane fully edge-matches.
+- **Flow Field** — drawn particles advected by curl noise with fading
+  trails (deliberately a simulation, for contrast with Scatter).
+- **Reaction-Diffusion** — Gray-Scott chemistry seeded from a drawn
+  asset, with spots/stripes/coral/worms presets and asset-modulated feed.
+- **Granular Time** — granular playback of an animation: multiple read
+  heads, position spray, reverse probability, grain envelopes.
+
+These are prototypes for possible language builtins; none of them change
+the exported `.grainasset` format.
+
+`./deploy-preview.sh` publishes this directory to the `preview/`
+subfolder of the grain-pub Pages site
+(`https://sebastianpfluegelmeier.github.io/grain-pub/preview/`), leaving
+the production root untouched.
 
 ## Deploying to GitHub Pages
 

@@ -63,7 +63,27 @@ const BAYER4 = [
 ];
 const ONION_PREV_CSS = "rgba(217, 45, 32, 0.32)";
 const ONION_NEXT_CSS = "rgba(39, 90, 210, 0.32)";
-const DOCK_SCROLL_SELECTORS = [".tool-row", ".brush-row", ".frame-actions", ".tile-actions", ".tile-row"];
+// Guides (coarse grid, centre lines, snapping, pinned reference frame) are
+// editor-only settings. They live under their own storage key so they never
+// reach the asset list, sync or the exported .grainasset.
+const GUIDES_KEY = "grain.assets.guides.v1";
+const GRID_PRESETS = [4, 8];
+const MIN_GRID_STEP = 2;
+const MAX_GRID_STEP = 256;
+const SNAP_TOOLS = ["line", "square"];
+const PIN_TINT_RGB = "16, 140, 84";
+const CENTRE_LINE_RGB = "214, 51, 132";
+const GUIDE_DEFAULTS = Object.freeze({
+  grid: false,
+  gridW: 8,
+  gridH: 8,
+  centre: false,
+  snap: false,
+  pin: null, // { assetId, particleId, frame }
+  pinOn: true,
+  pinOpacity: 35,
+});
+const DOCK_SCROLL_SELECTORS = [".tool-row", ".brush-row", ".frame-actions", ".tile-actions", ".guide-row", ".tile-row"];
 const CELL_NOUNS = {
   tileset: "tile",
   animation: "frame",
@@ -104,6 +124,11 @@ const ICONS = {
   gradient: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="3.4" height="10" fill="currentColor"/><rect x="6.3" y="3" width="3.4" height="10" fill="currentColor" opacity="0.55"/><rect x="9.6" y="3" width="3.4" height="10" fill="currentColor" opacity="0.18"/><rect x="3" y="3" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`,
   fill: `<svg ${ICON_ATTRS}><path d="M7.5 2.2 12.6 7.3 8 11.9a1.4 1.4 0 0 1-2 0L3.6 9.5a1.4 1.4 0 0 1 0-2z"/><path d="M13.4 10.6s1.2 1.5 1.2 2.4a1.2 1.2 0 0 1-2.4 0c0-.9 1.2-2.4 1.2-2.4z" fill="currentColor" stroke="none"/></svg>`,
   shift: `<svg ${ICON_ATTRS}><path d="M8 2.5v11M2.5 8h11"/><path d="M6.3 4.2 8 2.5l1.7 1.7M6.3 11.8 8 13.5l1.7-1.7M4.2 6.3 2.5 8l1.7 1.7M11.8 6.3 13.5 8l-1.7 1.7"/></svg>`,
+  grid: `<svg ${ICON_ATTRS}><rect x="2.5" y="2.5" width="11" height="11"/><path d="M8 2.5v11M2.5 8h11"/></svg>`,
+  centre: `<svg ${ICON_ATTRS}><rect x="3.5" y="3.5" width="9" height="9" opacity="0.4"/><path d="M8 1.5v13M1.5 8h13"/></svg>`,
+  snap: `<svg ${ICON_ATTRS}><path d="M3.5 2.5v5.5a4.5 4.5 0 0 0 9 0V2.5H9.7v5.5a1.7 1.7 0 0 1-3.4 0V2.5z"/><path d="M3.5 5h2.8M9.7 5h2.8"/></svg>`,
+  pin: `<svg ${ICON_ATTRS}><path d="M8 10.2v4"/><path d="M5.4 2.5h5.2l-.7 3.9 2 2.7v1.1H4.1V9.1l2-2.7z"/></svg>`,
+  unpin: `<svg ${ICON_ATTRS}><path d="M8 10.2v4"/><path d="M5.4 2.5h5.2l-.7 3.9 2 2.7v1.1H4.1V9.1l2-2.7z"/><path d="M2.5 13.5 13.5 2.5"/></svg>`,
   onion: `<svg ${ICON_ATTRS}><rect x="2.5" y="2.5" width="8" height="8"/><rect x="5.5" y="5.5" width="8" height="8" stroke-dasharray="1.6 1.8"/></svg>`,
   tween: `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3.4" cy="8" r="1.7" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.7" fill="currentColor" fill-opacity="0.45" stroke="none"/><circle cx="12.6" cy="8" r="1.7"/></svg>`,
   stack: `<svg ${ICON_ATTRS}><path d="M8 2.2 14 5.2 8 8.2 2 5.2z"/><path d="M2 8.2l6 3 6-3M2 11.2l6 3 6-3"/></svg>`,
@@ -149,6 +174,9 @@ const state = {
   allFrames: false,
   paintScope: "active",
   onion: false,
+  guides: loadGuides(),
+  dragAnchor: null, // start of a line or rectangle drag, see beginShapeDrag
+  snapMarker: null, // {x, y} in cell-edge coordinates, shown while snapping
   flash: "",
   selection: null, // {x, y, w, h} in cell coords on the active grid
   selectDrag: null, // "marquee" | "move" while dragging with the select tool
@@ -531,7 +559,7 @@ function normalizeAsset(asset) {
   if (asset.type === "blockset") return normalizeBlockset(asset);
   if (asset.type !== "tileset" || !Array.isArray(asset.tiles)) return null;
   const tileSize = clampInt(asset.tileSize || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, MAX_TILE_SIZE);
-  const tiles = asset.tiles.map((tile) => normalizeGrid(tile, tileSize, tileSize));
+  const tiles = asset.tiles.map((tile) => normalizeGrid(tile, tileSize, tileSize, true));
   return {
     id: String(asset.id || freshId()),
     type: "tileset",
@@ -587,7 +615,7 @@ function normalizeFramed(asset) {
   const width = clampInt(asset.width || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
   const height = clampInt(asset.height || DEFAULT_TILE_SIZE, MIN_TILE_SIZE, maxSize);
   const source = Array.isArray(asset.frames) ? asset.frames : [];
-  const allowGray = asset.type === "cube";
+  const allowGray = supportsGrayscale(asset);
   const frames = source.map((frame) => normalizeGrid(frame, width, height, allowGray));
   return {
     id: String(asset.id || freshId()),
@@ -634,6 +662,104 @@ function normalizeGrid(cells, width, height, allowGray = false) {
 
 function saveAssets() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ assets: state.assets }));
+}
+
+function loadGuides() {
+  try {
+    return normalizeGuides(JSON.parse(localStorage.getItem(GUIDES_KEY)));
+  } catch {
+    return normalizeGuides(null);
+  }
+}
+
+function normalizeGuides(source) {
+  const input = source && typeof source === "object" ? source : {};
+  const pin = input.pin && typeof input.pin === "object" && typeof input.pin.assetId === "string"
+    ? {
+      assetId: input.pin.assetId,
+      particleId: input.pin.particleId ?? null,
+      frame: clampInt(input.pin.frame, 0, 0xffff),
+    }
+    : null;
+  return {
+    grid: input.grid === true,
+    gridW: clampInt(input.gridW ?? GUIDE_DEFAULTS.gridW, MIN_GRID_STEP, MAX_GRID_STEP),
+    gridH: clampInt(input.gridH ?? GUIDE_DEFAULTS.gridH, MIN_GRID_STEP, MAX_GRID_STEP),
+    centre: input.centre === true,
+    snap: input.snap === true,
+    pin,
+    pinOn: input.pinOn !== false,
+    pinOpacity: clampInt(input.pinOpacity ?? GUIDE_DEFAULTS.pinOpacity, 5, 90),
+  };
+}
+
+function saveGuides() {
+  localStorage.setItem(GUIDES_KEY, JSON.stringify(state.guides));
+}
+
+function setGuides(patch) {
+  state.guides = normalizeGuides({ ...state.guides, ...patch });
+  saveGuides();
+}
+
+/* ---------- Pinned reference frame ---------- */
+
+// The pin is a reference, not a pixel copy, so the ghost follows later edits.
+function pinnedFrame() {
+  const pin = state.guides.pin;
+  if (!pin) return null;
+  const asset = state.assets.find((item) => item.id === pin.assetId);
+  if (!asset) return null;
+  if (asset.type === "particles") {
+    const index = asset.particles.findIndex((item) => item.id === pin.particleId);
+    const particle = asset.particles[index];
+    const cells = particle?.frames[pin.frame];
+    if (!cells) return null;
+    return { asset, cells, width: particle.width, height: particle.height, particleIndex: index };
+  }
+  const frames = asset.type === "tileset" ? asset.tiles : asset.type === "blockset" ? asset.layers : asset.frames;
+  const cells = frames[pin.frame];
+  if (!cells) return null;
+  const size = asset.type === "tileset" ? asset.tileSize : null;
+  return { asset, cells, width: size ?? asset.width, height: size ?? asset.height, particleIndex: null };
+}
+
+// Drops a pin whose asset, particle or frame no longer exists.
+function prunePinnedFrame() {
+  if (state.guides.pin && !pinnedFrame()) setGuides({ pin: null });
+}
+
+function activePinRef(asset) {
+  return {
+    assetId: asset.id,
+    particleId: asset.type === "particles" ? selectedParticle(asset)?.id ?? null : null,
+    frame: state.activeTile,
+  };
+}
+
+// True when the pin points into the frame list that is being edited.
+function pinInActiveList(asset) {
+  const pin = state.guides.pin;
+  if (!pin || !asset || pin.assetId !== asset.id) return false;
+  return asset.type !== "particles" || pin.particleId === selectedParticle(asset)?.id;
+}
+
+function pinIsActiveFrame(asset) {
+  return pinInActiveList(asset) && state.guides.pin.frame === state.activeTile;
+}
+
+function movePinnedFrame(asset, remap) {
+  if (!pinInActiveList(asset)) return;
+  const frame = remap(state.guides.pin.frame);
+  setGuides({ pin: frame === null ? null : { ...state.guides.pin, frame } });
+}
+
+function pinDescription() {
+  const pinned = pinnedFrame();
+  if (!pinned) return "";
+  const { asset, particleIndex } = pinned;
+  const particle = particleIndex === null ? "" : `, particle ${particleIndex + 1}`;
+  return `${asset.name}${particle}, ${cellNoun(asset)} ${state.guides.pin.frame + 1}`;
 }
 
 /* ---------- Binary export ---------- */
@@ -692,7 +818,7 @@ function encodeBinaryAsset(asset) {
     offset += 1;
   }
 
-  const allowGray = asset.type === "cube";
+  const allowGray = supportsGrayscale(asset);
   for (const cells of items) {
     for (let i = 0; i < cellsPerItem; i += 1) {
       view.setUint16(offset, normalizePixel(cells[i], allowGray), true);
@@ -950,6 +1076,10 @@ function hasGalleryAnimation(asset) {
   return (asset.type === "tileset" || hasPlayback(asset)) && cellsOf(asset).length > 1;
 }
 
+function supportsGrayscale(asset) {
+  return asset?.type === "cube" || asset?.type === "tileset";
+}
+
 function wraps(asset) {
   return asset.type === "cube";
 }
@@ -1000,6 +1130,9 @@ function dispatch(action) {
     "toggleAllFrames",
     "setZoom",
     "setParticlePreview",
+    "setGuides",
+    "pinFrame",
+    "unpinFrame",
   ];
   if (state.playing && !keepsPlayback.includes(action.type)) {
     stopPlayback();
@@ -1011,6 +1144,13 @@ function dispatch(action) {
       state.activeParticle = 0;
       state.status = "Local only";
       state.zoom = 1;
+      resetHistory();
+      break;
+    case "openNoiseLab":
+      state.screen = "noiselab";
+      state.activeAssetId = null;
+      state.activeParticle = 0;
+      state.status = "Noise Lab — previews only, assets stay untouched";
       resetHistory();
       break;
     case "createAsset": {
@@ -1053,6 +1193,7 @@ function dispatch(action) {
       break;
     case "deleteAsset":
       state.assets = state.assets.filter((asset) => asset.id !== action.id);
+      prunePinnedFrame();
       state.pendingDelete = null;
       state.status = "Deleted asset";
       saveAssets();
@@ -1165,6 +1306,7 @@ function dispatch(action) {
         [asset.visibility[from], asset.visibility[to]] = [asset.visibility[to], asset.visibility[from]];
       }
       state.activeTile = to;
+      movePinnedFrame(asset, (frame) => (frame === from ? to : frame === to ? from : frame));
       touch(asset);
       break;
     }
@@ -1282,6 +1424,7 @@ function dispatch(action) {
         }
         pushHistory();
         asset.particles.splice(state.activeParticle, 1);
+        prunePinnedFrame();
         resetParticlePreviewChoices(asset);
         state.activeParticle = Math.min(state.activeParticle, asset.particles.length - 1);
         state.activeTile = 0;
@@ -1317,6 +1460,8 @@ function dispatch(action) {
         const cells = cellsOf(asset);
         cells.splice(state.activeTile + 1, 0, [...cells[state.activeTile]]);
         if (asset.type === "blockset") asset.visibility.splice(state.activeTile + 1, 0, true);
+        const source = state.activeTile;
+        movePinnedFrame(asset, (frame) => (frame > source ? frame + 1 : frame));
         state.activeTile += 1;
         touch(asset);
       }
@@ -1332,6 +1477,8 @@ function dispatch(action) {
           if (asset.type === "blockset") asset.visibility[0] = true;
           state.activeTile = 0;
         } else {
+          const removed = state.activeTile;
+          movePinnedFrame(asset, (frame) => (frame === removed ? null : frame > removed ? frame - 1 : frame));
           cells.splice(state.activeTile, 1);
           if (asset.type === "blockset") asset.visibility.splice(state.activeTile, 1);
           state.activeTile = Math.min(state.activeTile, cells.length - 1);
@@ -1350,6 +1497,17 @@ function dispatch(action) {
     case "toggleOnion":
       state.onion = !state.onion;
       break;
+    case "setGuides":
+      setGuides(action.patch);
+      break;
+    case "pinFrame": {
+      const asset = activeAsset();
+      if (asset) setGuides({ pin: activePinRef(asset), pinOn: true });
+      break;
+    }
+    case "unpinFrame":
+      setGuides({ pin: null });
+      break;
     case "tween": {
       const asset = activeAsset();
       if (!asset || !hasPlayback(asset)) break;
@@ -1367,7 +1525,7 @@ function dispatch(action) {
         break;
       }
       pushHistory();
-      const lerpGray = asset.type === "cube";
+      const lerpGray = supportsGrayscale(asset);
       for (let k = start + 1; k < end; k += 1) {
         const t = (k - start) / (end - start);
         frames[k] = frames[start].map((value, index) => {
@@ -1564,12 +1722,20 @@ function render() {
   // The DOM is rebuilt, so any hover state is stale; a genuine hover
   // re-fires mouseenter on the next mouse move.
   const scrollPositions = captureDockScroll();
+  prunePinnedFrame();
   hoverPreviewId = null;
   app.innerHTML = "";
   app.append(topbar());
   const screen = document.createElement("section");
   screen.className = "screen";
-  screen.append(state.screen === "editor" ? editorScreen() : galleryScreen());
+  if (state.screen !== "noiselab") noiseLabStop();
+  screen.append(
+    state.screen === "editor"
+      ? editorScreen()
+      : state.screen === "noiselab"
+        ? noiseLabScreen()
+        : galleryScreen(),
+  );
   app.append(screen);
   if (state.pendingDelete) {
     const overlay = confirmOverlay();
@@ -1695,9 +1861,10 @@ function topbar() {
   `;
   const right = document.createElement("div");
   right.className = "topbar-actions";
-  if (state.screen === "editor") {
+  if (state.screen === "editor" || state.screen === "noiselab") {
     right.append(iconTextButton("Gallery", "back", "btn", () => dispatch({ type: "openGallery" })));
   } else {
+    right.append(iconTextButton("Noise Lab", "noise", "btn", () => dispatch({ type: "openNoiseLab" })));
     right.append(iconTextButton("Sync", "sync", "btn", () => dispatch({ type: "openSync" })));
   }
   header.append(right);
@@ -1762,30 +1929,42 @@ function syncConfigured() {
   return Boolean(token && owner);
 }
 
+function syncScope() {
+  const { owner, repo } = syncConfig();
+  return JSON.stringify([owner, repo, SYNC_BRANCH]);
+}
+
+function assetVersion(asset) {
+  // Content, rather than wall-clock time, detects edits made in the same millisecond.
+  let a = 2166136261, b = 2246822507;
+  for (const byte of encodeBinaryAsset(asset)) {
+    a = Math.imul(a ^ byte, 16777619);
+    b = Math.imul(b ^ byte, 3266489909);
+  }
+  return `${a >>> 0}:${b >>> 0}`;
+}
+
 function syncStateRecord() {
   try {
-    const raw = localStorage.getItem(SYNC_STATE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Number.isFinite(parsed.at) || !Array.isArray(parsed.names)) return null;
+    const parsed = JSON.parse(localStorage.getItem(SYNC_STATE_KEY));
+    if (!parsed || parsed.scope !== syncScope() || !parsed.versions
+        || !Number.isFinite(parsed.at)) return null;
     return parsed;
   } catch {
     return null;
   }
 }
 
-function recordSyncState() {
+function recordSyncState(versions, replace = false) {
+  const previous = replace ? {} : (syncStateRecord()?.versions || {});
   localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
-    at: Date.now(),
-    names: state.assets.map((asset) => asset.name),
+    at: Date.now(), scope: syncScope(), versions: { ...previous, ...versions },
   }));
 }
 
 function assetUnsynced(asset) {
   if (!syncConfigured()) return false;
-  const record = syncStateRecord();
-  if (!record) return true;
-  return !record.names.includes(asset.name) || asset.updatedAt > record.at;
+  return syncStateRecord()?.versions[asset.name] !== assetVersion(asset);
 }
 
 function relativeTime(timestamp) {
@@ -1818,6 +1997,7 @@ async function syncPush() {
     return;
   }
   setSyncStatus("Pushing…", true);
+  const scope = syncScope();
   try {
     const remote = await GrainSync.listTree(token, owner, repo, SYNC_BRANCH);
     const localPaths = new Set(state.assets.map(assetRemotePath));
@@ -1835,9 +2015,11 @@ async function syncPush() {
       setSyncStatus("Nothing to push.", false);
       return;
     }
+    const versions = Object.fromEntries(state.assets.map(asset => [asset.name, assetVersion(asset)]));
+    if (scope !== syncScope()) throw new Error("Sync destination changed during push");
     const message = `${new Date().toISOString()} — asset editor sync`;
     await GrainSync.putTree(token, owner, repo, files, message, deletes, SYNC_BRANCH);
-    recordSyncState();
+    if (scope === syncScope()) recordSyncState(versions, true);
     setSyncStatus(`Pushed ${files.length} asset${files.length === 1 ? "" : "s"}${deletes.length ? `, removed ${deletes.length}` : ""}.`, false);
   } catch (error) {
     setSyncStatus(`Push failed: ${error.message}`, false);
@@ -1851,28 +2033,44 @@ async function syncPull() {
     return;
   }
   setSyncStatus("Pulling…", true);
+  const scope = syncScope();
   try {
     const remote = await GrainSync.listTree(token, owner, repo, SYNC_BRANCH);
+    if (remote?.truncated) throw new Error("Remote asset listing is incomplete; sync stopped");
     const entries = (remote ? remote.tree : [])
       .filter((entry) => entry.path.startsWith(SYNC_PREFIX) && entry.path.endsWith(".grainasset"));
-    let pulled = 0;
+    const incoming = [];
     for (const entry of entries) {
       const bytes = await GrainSync.getBlob(token, owner, repo, entry.sha);
-      let asset = null;
       try {
-        asset = decodeBinaryAsset(bytes, assetNameFromRemotePath(entry.path));
+        const asset = decodeBinaryAsset(bytes, assetNameFromRemotePath(entry.path));
+        if (asset) incoming.push(asset);
       } catch {
         continue;
       }
-      if (!asset) continue;
-      const index = state.assets.findIndex((item) => item.name === asset.name);
-      if (index >= 0) state.assets[index] = asset;
+    }
+    if (scope !== syncScope()) throw new Error("Sync destination changed during pull");
+    let pulled = 0, conflicts = 0;
+    const versions = Object.create(null);
+    for (const asset of incoming) {
+      const index = state.assets.findIndex(item => item.name === asset.name);
+      const local = state.assets[index];
+      const version = assetVersion(asset);
+      if (local && assetUnsynced(local) && assetVersion(local) !== version) {
+        conflicts += 1;
+        continue;
+      }
+      if (index >= 0) {
+        if (assetVersion(local) !== version) state.assets[index] = { ...asset, id: local.id };
+      }
       else state.assets.push(asset);
+      versions[asset.name] = version;
       pulled += 1;
     }
     saveAssets();
-    if (pulled) recordSyncState();
-    setSyncStatus(pulled ? `Pulled ${pulled} asset${pulled === 1 ? "" : "s"} (remote wins).` : "Nothing to pull.", false);
+    recordSyncState(versions, true);
+    setSyncStatus(`Pulled ${pulled} asset${pulled === 1 ? "" : "s"}.`
+      + (conflicts ? ` Kept ${conflicts} locally edited asset${conflicts === 1 ? "" : "s"}; push to publish your version.` : ""), false);
   } catch (error) {
     setSyncStatus(`Pull failed: ${error.message}`, false);
   }
@@ -2083,6 +2281,7 @@ function editorScreen() {
   canvas.addEventListener("pointermove", onCanvasPointerMove);
   canvas.addEventListener("pointerup", onCanvasPointerUp);
   canvas.addEventListener("pointercancel", onCanvasPointerCancel);
+  canvas.addEventListener("pointerleave", clearHoverSnap);
   canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   canvasArea.addEventListener("wheel", onCanvasWheel, { passive: false });
   canvasArea.append(canvas);
@@ -2092,7 +2291,7 @@ function editorScreen() {
 
   const dock = document.createElement("div");
   dock.className = "dock";
-  dock.append(toolRow(asset), colorRow(asset), brushRow(asset), frameActions(asset), tileActions(asset), tileRow(asset));
+  dock.append(toolRow(asset), colorRow(asset), brushRow(asset), frameActions(asset), tileActions(asset), guideRow(asset), tileRow(asset));
   wrap.append(dock);
   return wrap;
 }
@@ -2303,7 +2502,7 @@ function brushRow(asset) {
   if (["z", "zsoft"].includes(paintScopeFor(asset)) && hasPlayback(asset)) {
     row.append(controlCluster("Z", zBrushControl(asset)));
   }
-  if (asset.type === "cube") {
+  if (supportsGrayscale(asset)) {
     row.append(controlCluster("Gray", grayRangeControl()));
     row.append(controlCluster("Alpha", opacityRangeControl()));
   }
@@ -2739,10 +2938,102 @@ function frameActions(asset) {
   return row;
 }
 
+function guideRow(asset) {
+  const guides = state.guides;
+  const row = document.createElement("div");
+  row.className = "guide-row";
+  const toggle = (label, icon, key) => iconButton(
+    guides[key] ? `${label} on` : label,
+    icon,
+    `icon-btn${guides[key] ? " playing" : ""}`,
+    () => dispatch({ type: "setGuides", patch: { [key]: !guides[key] } }),
+  );
+
+  const size = document.createElement("div");
+  size.className = "grid-size";
+  for (const preset of GRID_PRESETS) {
+    const active = guides.gridW === preset && guides.gridH === preset;
+    const chip = button(String(preset), `grid-preset${active ? " active" : ""}`, () =>
+      dispatch({ type: "setGuides", patch: { gridW: preset, gridH: preset } }));
+    chip.title = `Grid every ${preset} pixels`;
+    chip.ariaLabel = chip.title;
+    size.append(chip);
+  }
+  const stepInput = (key, label) => {
+    const input = document.createElement("input");
+    input.className = "grid-step";
+    input.type = "number";
+    input.min = String(MIN_GRID_STEP);
+    input.max = String(MAX_GRID_STEP);
+    input.step = "1";
+    input.value = String(guides[key]);
+    input.ariaLabel = label;
+    input.title = label;
+    input.addEventListener("change", () => dispatch({ type: "setGuides", patch: { [key]: input.value } }));
+    return input;
+  };
+  const times = document.createElement("span");
+  times.textContent = "×";
+  times.ariaHidden = "true";
+  size.append(stepInput("gridW", "Grid width in pixels"), times, stepInput("gridH", "Grid height in pixels"));
+
+  row.append(
+    toggle("Coarse grid", "grid", "grid"),
+    size,
+    toggle("Centre lines", "centre", "centre"),
+    toggle("Snap line and rectangle to grid and centre (hold Alt to bypass)", "snap", "snap"),
+    toolbarDivider(),
+  );
+
+  const pinned = pinnedFrame();
+  const onPinned = pinIsActiveFrame(asset);
+  row.append(iconButton(
+    onPinned ? "This frame is the pinned reference" : `Pin this ${cellNoun(asset)} as reference`,
+    "pin",
+    `icon-btn${onPinned ? " playing" : ""}`,
+    () => dispatch({ type: "pinFrame" }),
+  ));
+  if (pinned) {
+    const thumb = document.createElement("canvas");
+    thumb.className = "pin-thumb";
+    thumb.dataset.pinThumb = "true";
+    thumb.title = `Pinned: ${pinDescription()}`;
+    thumb.role = "img";
+    thumb.ariaLabel = thumb.title;
+    const opacity = document.createElement("input");
+    opacity.className = "pin-opacity";
+    opacity.type = "range";
+    opacity.min = "5";
+    opacity.max = "90";
+    opacity.step = "5";
+    opacity.value = String(guides.pinOpacity);
+    opacity.ariaLabel = "Reference opacity";
+    opacity.title = "Reference opacity";
+    opacity.disabled = !guides.pinOn;
+    // Redraw without rebuilding the dock, so the slider keeps its drag.
+    opacity.addEventListener("input", () => {
+      setGuides({ pinOpacity: opacity.value });
+      drawCanvases();
+    });
+    row.append(
+      thumb,
+      iconButton(
+        guides.pinOn ? "Hide reference" : "Show reference",
+        guides.pinOn ? "eye" : "eyeOff",
+        "icon-btn",
+        () => dispatch({ type: "setGuides", patch: { pinOn: !guides.pinOn } }),
+      ),
+      opacity,
+      iconButton("Unpin reference", "unpin", "icon-btn", () => dispatch({ type: "unpinFrame" })),
+    );
+  }
+  return row;
+}
+
 function colorRow(asset) {
   const row = document.createElement("div");
   row.className = "color-row";
-  if (asset.type === "cube") {
+  if (supportsGrayscale(asset)) {
     const chip = button("", `gray-chip gray-chip-btn${state.color !== Pixel.Transparent ? " active" : ""}`, () =>
       dispatch({ type: "setColor", color: grayPixel(state.grayMin) }));
     chip.title = "Gray paint";
@@ -3163,7 +3454,8 @@ function beginCanvasPointerDown(event, capture = true) {
   if (state.pointerDown) return;
   if (event.pointerType === "mouse" && event.button !== 0 && event.button !== 2) return;
   const asset = activeAsset();
-  const cell = cellFromEvent(event);
+  const point = pointFromEvent(event);
+  const cell = point?.cell;
   if (!asset || !cell) return;
   if (state.playing) stopPlayback();
   state.eraseStroke = event.button === 2;
@@ -3209,14 +3501,19 @@ function beginCanvasPointerDown(event, capture = true) {
     state.lastPaintCell = null;
     state.strokePath = [];
     state.strokeBase = null;
-    drawCanvases(cell);
+    drawCanvases(SNAP_TOOLS.includes(state.tool) ? beginShapeDrag(event, point, asset) : cell);
   }
 }
 
 function moveCanvasPointer(event) {
-  if (!state.pointerDown || event.pointerId !== activeCanvasPointerId) return;
+  if (!state.pointerDown) {
+    updateHoverSnap(event);
+    return;
+  }
+  if (event.pointerId !== activeCanvasPointerId) return;
   const asset = activeAsset();
-  const cell = cellFromEvent(event);
+  const point = pointFromEvent(event);
+  const cell = point?.cell;
   if (!asset || !cell) return;
   if (state.tool === "select") {
     const clamped = clampCell(asset, cell);
@@ -3234,13 +3531,20 @@ function moveCanvasPointer(event) {
     state.lastPaintCell = cell;
     drawCanvases();
   } else {
-    drawCanvases(cell);
+    drawCanvases(state.dragAnchor ? shapeDragEnd(event, point, asset) : cell);
   }
 }
 
 function finishCanvasPointer(event) {
   if (!state.pointerDown || event.pointerId !== activeCanvasPointerId) return;
-  const cell = cellFromEvent(event) || state.dragStart;
+  const point = pointFromEvent(event);
+  let cell = point?.cell || state.dragStart;
+  if (state.dragAnchor) {
+    // A release outside the canvas keeps the last previewed end point.
+    const asset = activeAsset();
+    cell = point && asset ? shapeDragEnd(event, point, asset) : state.dragAnchor.end || cell;
+    state.dragAnchor = null;
+  }
   state.pointerDown = false;
   activeCanvasPointerId = null;
   activeCanvasPointerType = null;
@@ -3295,6 +3599,8 @@ function resetActiveCanvasPointer() {
   state.selectDrag = null;
   state.moveOffset = null;
   state.dragStart = null;
+  state.dragAnchor = null;
+  state.snapMarker = null;
   state.eraseStroke = false;
   state.lastPaintCell = null;
   state.strokePath = [];
@@ -3302,16 +3608,207 @@ function resetActiveCanvasPointer() {
 }
 
 function cellFromEvent(event) {
+  return pointFromEvent(event)?.cell ?? null;
+}
+
+// Pointer position in tile coordinates: the cell under the pointer plus the
+// fractional position (fx, fy) that snapping measures distances from.
+function pointFromEvent(event) {
   const asset = activeAsset();
   if (!asset) return null;
   const margin = wrapMarginOf(asset);
   const width = widthOf(asset) + 2 * margin.x;
   const height = heightOf(asset) + 2 * margin.y;
   const rect = event.currentTarget.getBoundingClientRect();
-  const x = Math.floor(((event.clientX - rect.left) / rect.width) * width) - margin.x;
-  const y = Math.floor(((event.clientY - rect.top) / rect.height) * height) - margin.y;
+  const fx = ((event.clientX - rect.left) / rect.width) * width - margin.x;
+  const fy = ((event.clientY - rect.top) / rect.height) * height - margin.y;
+  const x = Math.floor(fx);
+  const y = Math.floor(fy);
   if (x < -margin.x || y < -margin.y || x >= widthOf(asset) + margin.x || y >= heightOf(asset) + margin.y) return null;
-  return { x, y };
+  return { fx, fy, cell: { x, y } };
+}
+
+/* ---------- Snapping ---------- */
+
+// Snapping works per axis on cell edges: edge 0 is the left side of pixel 0,
+// edge `size` the right side of the last pixel. Targets are the coarse grid,
+// the tile edges and, when shown, the centre line.
+
+function snapAxis(asset, horizontal) {
+  const margin = wrapMarginOf(asset);
+  return {
+    size: horizontal ? widthOf(asset) : heightOf(asset),
+    step: horizontal ? state.guides.gridW : state.guides.gridH,
+    margin: horizontal ? margin.x : margin.y,
+    centre: state.guides.centre,
+  };
+}
+
+function snapEdges({ size, step, margin, centre }) {
+  const edges = new Set([0, size]);
+  for (let k = Math.ceil(-margin / step); k * step <= size + margin; k += 1) edges.add(k * step);
+  if (centre) {
+    if (size % 2 === 0) {
+      edges.add(size / 2);
+    } else {
+      edges.add((size - 1) / 2);
+      edges.add((size + 1) / 2);
+    }
+  }
+  return [...edges].sort((a, b) => a - b);
+}
+
+function nearestValue(values, position) {
+  let best = values[0];
+  for (const value of values) {
+    if (Math.abs(value - position) < Math.abs(best - position)) best = value;
+  }
+  return best;
+}
+
+// A line endpoint snaps to the pixel at an intersection: the pixel right of
+// (below) the edge, or the last pixel for the far tile edge. On odd sizes the
+// centre target is the middle pixel itself. Returns the pixel and the
+// position of the marker.
+function snapLinePixel(position, axis) {
+  const last = axis.size + axis.margin - 1;
+  const targets = snapEdges({ ...axis, centre: false }).map((edge) => ({ pixel: Math.min(edge, last), mark: edge }));
+  if (axis.centre) {
+    targets.push(axis.size % 2 === 0
+      ? { pixel: axis.size / 2, mark: axis.size / 2 }
+      : { pixel: (axis.size - 1) / 2, mark: axis.size / 2 });
+  }
+  let best = targets[0];
+  for (const target of targets) {
+    if (Math.abs(target.mark - position) < Math.abs(best.mark - position)) best = target;
+  }
+  return best;
+}
+
+// One axis of a rectangle. `start` is the fixed corner as an edge interval:
+// {lo: e, hi: e} for a snapped corner, {lo: c, hi: c + 1} for a free one on
+// cell c. A snapped end corner picks the nearest edge on the pointer's side
+// of the start, so the rectangle always covers whole cells and is never
+// empty. Returns the first and last cell of the span and the marker edge.
+function snapRectAxis(start, position, cell, edges) {
+  const forward = position >= (start.lo + start.hi) / 2;
+  const candidates = edges ? edges.filter((edge) => (forward ? edge >= start.lo + 1 : edge <= start.hi - 1)) : [];
+  const mark = candidates.length ? nearestValue(candidates, position) : null;
+  const lo = Math.min(start.lo, mark ?? cell);
+  const hi = Math.max(start.hi, mark ?? cell + 1);
+  return forward ? { from: lo, to: hi - 1, mark } : { from: hi - 1, to: lo, mark };
+}
+
+// Shift: keep the line on the nearest of 0°, 45° and 90°. The direction
+// comes from the raw pointer offset (dx, dy), the length from `end`, which
+// may already be snapped. `min` and `max` bound the pixels per axis.
+function constrainLineEnd(start, end, dx, dy, min, max) {
+  const sector = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+  if (sector % 4 === 0) return { x: end.x, y: start.y };
+  if (sector % 4 === 2) return { x: start.x, y: end.y };
+  const signX = sector === 1 || sector === 7 ? 1 : -1;
+  const signY = sector === 1 || sector === 3 ? 1 : -1;
+  const length = Math.min(
+    Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y)),
+    signX > 0 ? max.x - start.x : start.x - min.x,
+    signY > 0 ? max.y - start.y : start.y - min.y,
+  );
+  return { x: start.x + signX * length, y: start.y + signY * length };
+}
+
+function snapEnabledFor(event) {
+  return state.guides.snap && !event.altKey && SNAP_TOOLS.includes(state.tool);
+}
+
+// The snapped point under a hovering pointer, in edge coordinates.
+function hoverSnapPoint(point, asset) {
+  const axisX = snapAxis(asset, true);
+  const axisY = snapAxis(asset, false);
+  if (state.tool === "line") {
+    return { x: snapLinePixel(point.fx, axisX).mark, y: snapLinePixel(point.fy, axisY).mark };
+  }
+  return { x: nearestValue(snapEdges(axisX), point.fx), y: nearestValue(snapEdges(axisY), point.fy) };
+}
+
+// Fixes the start of a line or rectangle drag. Preview and commit both read
+// state.dragStart, so they always agree on the snapped points.
+function beginShapeDrag(event, point, asset) {
+  const snap = snapEnabledFor(event);
+  state.snapMarker = snap ? hoverSnapPoint(point, asset) : null;
+  if (state.tool === "line") {
+    const start = snap
+      ? { x: snapLinePixel(point.fx, snapAxis(asset, true)).pixel, y: snapLinePixel(point.fy, snapAxis(asset, false)).pixel }
+      : point.cell;
+    state.dragStart = start;
+    state.dragAnchor = { end: start };
+    return start;
+  }
+  const corner = (edge, cell) => (snap ? { lo: edge, hi: edge } : { lo: cell, hi: cell + 1 });
+  state.dragAnchor = {
+    x: corner(state.snapMarker?.x, point.cell.x),
+    y: corner(state.snapMarker?.y, point.cell.y),
+    end: null,
+  };
+  return shapeDragEnd(event, point, asset);
+}
+
+// The end cell of a line or rectangle drag for the current pointer position.
+// For rectangles the start cell depends on the drag direction, so
+// state.dragStart is updated as well.
+function shapeDragEnd(event, point, asset) {
+  const anchor = state.dragAnchor;
+  const snap = snapEnabledFor(event);
+  const axisX = snapAxis(asset, true);
+  const axisY = snapAxis(asset, false);
+  let end;
+  if (state.tool === "line") {
+    const start = state.dragStart;
+    const snapX = snap ? snapLinePixel(point.fx, axisX) : null;
+    const snapY = snap ? snapLinePixel(point.fy, axisY) : null;
+    end = snap ? { x: snapX.pixel, y: snapY.pixel } : point.cell;
+    if (event.shiftKey) {
+      end = constrainLineEnd(
+        start,
+        end,
+        point.fx - (start.x + 0.5),
+        point.fy - (start.y + 0.5),
+        { x: -axisX.margin, y: -axisY.margin },
+        { x: axisX.size + axisX.margin - 1, y: axisY.size + axisY.margin - 1 },
+      );
+    }
+    state.snapMarker = snap
+      ? {
+        x: end.x === snapX.pixel ? snapX.mark : end.x + 0.5,
+        y: end.y === snapY.pixel ? snapY.mark : end.y + 0.5,
+      }
+      : null;
+  } else {
+    const spanX = snapRectAxis(anchor.x, point.fx, point.cell.x, snap ? snapEdges(axisX) : null);
+    const spanY = snapRectAxis(anchor.y, point.fy, point.cell.y, snap ? snapEdges(axisY) : null);
+    state.dragStart = { x: spanX.from, y: spanY.from };
+    end = { x: spanX.to, y: spanY.to };
+    state.snapMarker = spanX.mark !== null && spanY.mark !== null ? { x: spanX.mark, y: spanY.mark } : null;
+  }
+  anchor.end = end;
+  return end;
+}
+
+// Shows the snapped point before the click.
+function updateHoverSnap(event) {
+  const asset = activeAsset();
+  if (!asset || event.pointerType === "touch") return;
+  const point = snapEnabledFor(event) ? pointFromEvent(event) : null;
+  const marker = point ? hoverSnapPoint(point, asset) : null;
+  const previous = state.snapMarker;
+  if (marker?.x === previous?.x && marker?.y === previous?.y) return;
+  state.snapMarker = marker;
+  drawCanvases();
+}
+
+function clearHoverSnap() {
+  if (state.pointerDown || !state.snapMarker) return;
+  state.snapMarker = null;
+  drawCanvases();
 }
 
 function paintScopeFor(asset) {
@@ -3413,7 +3910,7 @@ function paintPoint(asset, width, height, targets, x, y, gradient = null, motion
 
 function usesStrokeGradient(asset) {
   return (
-    asset?.type === "cube"
+    supportsGrayscale(asset)
     && usesGradientRangeMode()
     && !state.eraseStroke
     && state.color !== Pixel.Transparent
@@ -3611,7 +4108,7 @@ function strokePixelForCell(asset, x, y, width, height, target, current, options
   if (state.eraseStroke || state.color === Pixel.Transparent) {
     return targetPixelPass(target, x, y) ? Pixel.Transparent : current;
   }
-  if (asset.type !== "cube") {
+  if (!supportsGrayscale(asset)) {
     if (!targetPixelPass(target, x, y)) return current;
     if (options.noise) return Math.random() < 0.5 ? Pixel.Black : Pixel.White;
     return normalizePixel(state.color);
@@ -3662,8 +4159,8 @@ function applyPaintOpacity(level, current, opacity, options = {}) {
 }
 
 function blurredPixel(snapshot, width, height, x, y, wrap, asset, target, current) {
-  if (!targetPixelPass(target, x, y) && (asset.type !== "cube" || current === Pixel.Transparent)) return current;
-  if (asset.type === "cube") {
+  if (!targetPixelPass(target, x, y) && (!supportsGrayscale(asset) || current === Pixel.Transparent)) return current;
+  if (supportsGrayscale(asset)) {
     let sum = 0;
     let count = 0;
     for (let dy = -1; dy <= 1; dy += 1) {
@@ -4069,12 +4566,17 @@ function drawCanvases(previewCell = null) {
     if (main) {
       if (asset.type === "blockset") {
         const preview = withShapePreview(cellsOf(asset)[state.activeTile], width, height, previewCell);
-        drawGrid(main, width, height, compositeCells(asset, preview));
+        drawGrid(main, width, height, compositeCells(asset, preview), null, null, pinUnderlays(asset), true);
       } else {
-        drawGrid(main, width, height, cellsOf(asset)[state.activeTile], previewCell, wrapMarginOf(asset), onionUnderlays(asset));
+        const underlays = [...pinUnderlays(asset), ...onionUnderlays(asset)];
+        drawGrid(main, width, height, cellsOf(asset)[state.activeTile], previewCell, wrapMarginOf(asset), underlays, true);
       }
       if (state.selection) drawSelectionOverlay(main, asset);
+      drawSnapMarker(main, asset);
     }
+    const pinThumb = document.querySelector("[data-pin-thumb]");
+    const pinned = pinThumb ? pinnedFrame() : null;
+    if (pinned) drawPreviewGrid(pinThumb, pinned.width, pinned.height, pinned.cells);
     document.querySelectorAll("[data-tile-thumb]").forEach((canvas) => {
       drawGrid(canvas, width, height, cellsOf(asset)[Number(canvas.dataset.tileThumb)]);
     });
@@ -4422,7 +4924,21 @@ function onionUnderlays(asset) {
   return underlays;
 }
 
-function drawGrid(canvas, width, height, cells, previewCell = null, margin = null, underlays = []) {
+// The pinned frame as an underlay. Unlike onion skin it does not depend on
+// the active frame, so it stays put while stepping through frames.
+function pinUnderlays(asset) {
+  if (!state.guides.pinOn) return [];
+  const pinned = pinnedFrame();
+  if (!pinned || pinned.cells === cellsOf(asset)[state.activeTile]) return [];
+  return [{
+    cells: pinned.cells,
+    width: pinned.width,
+    height: pinned.height,
+    css: `rgba(${PIN_TINT_RGB}, ${state.guides.pinOpacity / 100})`,
+  }];
+}
+
+function drawGrid(canvas, width, height, cells, previewCell = null, margin = null, underlays = [], guides = false) {
   if (!cells) return;
   const visible = withShapePreview(cells, width, height, previewCell);
   const marginX = margin ? margin.x : 0;
@@ -4448,9 +4964,26 @@ function drawGrid(canvas, width, height, cells, previewCell = null, margin = nul
       }
     }
   };
-  for (const underlay of underlays) paintCells(underlay.cells, underlay.css);
+  // An underlay of another size is centred on the tile and clipped to it.
+  const paintCentred = (underlay) => {
+    const offsetX = Math.floor((width - underlay.width) / 2);
+    const offsetY = Math.floor((height - underlay.height) / 2);
+    ctx.fillStyle = underlay.css;
+    for (let y = Math.max(0, -offsetY); y < underlay.height && y + offsetY < height; y += 1) {
+      for (let x = Math.max(0, -offsetX); x < underlay.width && x + offsetX < width; x += 1) {
+        if (underlay.cells[y * underlay.width + x] === Pixel.Transparent) continue;
+        ctx.fillRect((x + offsetX + marginX) * scale, (y + offsetY + marginY) * scale, scale, scale);
+      }
+    }
+  };
+  for (const underlay of underlays) {
+    const sameSize = (underlay.width ?? width) === width && (underlay.height ?? height) === height;
+    if (sameSize) paintCells(underlay.cells, underlay.css);
+    else paintCentred(underlay);
+  }
   paintCells(visible);
   drawGridLines(ctx, width + 2 * marginX, height + 2 * marginY, scale);
+  if (guides) drawGuides(ctx, canvas, width, height, marginX, marginY, scale);
   if (marginX || marginY) dimWrapMargins(ctx, width, height, marginX, marginY, scale);
 }
 
@@ -4491,6 +5024,95 @@ function drawChecker(ctx, canvas, renderWidth, renderHeight) {
       }
     }
   }
+}
+
+// Canvas pixels per CSS pixel, so overlays keep their on-screen size at any zoom.
+function canvasPixelRatio(canvas) {
+  const displayWidth = canvas.getBoundingClientRect().width;
+  return displayWidth > 0 ? canvas.width / displayWidth : 1;
+}
+
+// Coarse grid and centre lines. Positions are relative to the tile, so the
+// wrap margin of a cube shifts them instead of becoming their origin.
+function drawGuides(ctx, canvas, width, height, marginX, marginY, scale) {
+  const guides = state.guides;
+  if (!guides.grid && !guides.centre) return;
+  const ratio = canvasPixelRatio(canvas);
+  const renderWidth = (width + 2 * marginX) * scale;
+  const renderHeight = (height + 2 * marginY) * scale;
+  const line = Math.max(1, Math.round(ratio));
+  if (guides.grid) {
+    // Fade out between 16 and 6 screen pixels per grid cell.
+    const alphaFor = (step) => Math.max(0, Math.min(1, ((step * scale) / ratio - 6) / 10));
+    const stroke = (alpha, draw) => {
+      if (alpha <= 0) return;
+      ctx.fillStyle = `rgba(18, 18, 16, ${0.6 * alpha})`;
+      draw(-Math.floor(line / 2));
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.45 * alpha})`;
+      draw(line - Math.floor(line / 2));
+    };
+    stroke(alphaFor(guides.gridW), (shift) => {
+      for (let x = Math.ceil((1 - marginX) / guides.gridW) * guides.gridW; x < width + marginX; x += guides.gridW) {
+        ctx.fillRect((x + marginX) * scale + shift, 0, line, renderHeight);
+      }
+    });
+    stroke(alphaFor(guides.gridH), (shift) => {
+      for (let y = Math.ceil((1 - marginY) / guides.gridH) * guides.gridH; y < height + marginY; y += guides.gridH) {
+        ctx.fillRect(0, (y + marginY) * scale + shift, renderWidth, line);
+      }
+    });
+  }
+  if (guides.centre) {
+    const left = marginX * scale;
+    const top = marginY * scale;
+    const thick = Math.max(2, Math.round(2 * ratio));
+    // Even sizes: a line between the two middle pixels. Odd sizes: a band
+    // over the middle pixel.
+    const mark = (size, drawLineAt, drawBandAt) => {
+      if (size % 2 === 0) {
+        ctx.fillStyle = `rgba(${CENTRE_LINE_RGB}, 0.9)`;
+        drawLineAt((size / 2) * scale - Math.floor(thick / 2));
+      } else {
+        ctx.fillStyle = `rgba(${CENTRE_LINE_RGB}, 0.38)`;
+        drawBandAt(((size - 1) / 2) * scale);
+      }
+    };
+    mark(
+      width,
+      (x) => ctx.fillRect(left + x, top, thick, height * scale),
+      (x) => ctx.fillRect(left + x, top, scale, height * scale),
+    );
+    mark(
+      height,
+      (y) => ctx.fillRect(left, top + y, width * scale, thick),
+      (y) => ctx.fillRect(left, top + y, width * scale, scale),
+    );
+  }
+}
+
+function drawSnapMarker(canvas, asset) {
+  const marker = state.snapMarker;
+  if (!marker || !state.guides.snap || !SNAP_TOOLS.includes(state.tool)) return;
+  const margin = wrapMarginOf(asset);
+  const scale = renderScale(widthOf(asset), heightOf(asset));
+  const ratio = canvasPixelRatio(canvas);
+  const x = (marker.x + margin.x) * scale;
+  const y = (marker.y + margin.y) * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, 5 * ratio, 0, Math.PI * 2);
+  ctx.moveTo(x - 9 * ratio, y);
+  ctx.lineTo(x + 9 * ratio, y);
+  ctx.moveTo(x, y - 9 * ratio);
+  ctx.lineTo(x, y + 9 * ratio);
+  ctx.lineWidth = 3.5 * ratio;
+  ctx.strokeStyle = "#121210";
+  ctx.stroke();
+  ctx.lineWidth = 1.5 * ratio;
+  ctx.strokeStyle = "#f2c40f";
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawGridLines(ctx, width, height, scale) {

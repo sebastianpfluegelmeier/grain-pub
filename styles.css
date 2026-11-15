@@ -643,7 +643,7 @@ h1 {
 .dock {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto auto;
+  grid-template-rows: repeat(5, auto);
   gap: 7px 10px;
   align-items: center;
   min-height: 0;
@@ -737,9 +737,91 @@ h1 {
   border-top: 1px solid var(--line);
 }
 
-.tile-row {
+.guide-row {
   grid-column: 1 / -1;
   grid-row: 4;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.grid-size {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.grid-preset,
+.grid-step {
+  width: 30px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.grid-preset:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.grid-preset.active {
+  border-color: var(--ink);
+  color: #ffffff;
+  background: var(--ink);
+}
+
+.grid-step {
+  width: 38px;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.grid-step::-webkit-outer-spin-button,
+.grid-step::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.grid-step:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.pin-thumb {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  background: var(--checker-a);
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.pin-opacity {
+  width: 96px;
+  accent-color: var(--ink);
+}
+
+.pin-opacity:disabled {
+  opacity: 0.4;
+}
+
+.tile-row {
+  grid-column: 1 / -1;
+  grid-row: 5;
   min-height: 0;
   gap: 7px;
   margin: 0 -8px -8px;
@@ -1784,7 +1866,7 @@ h1 {
 
   .dock {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(6, auto);
+    grid-template-rows: repeat(7, auto);
     gap: 6px;
     padding: 8px;
     overflow: hidden;
@@ -1829,8 +1911,13 @@ h1 {
     padding-top: 6px;
   }
 
-  .tile-row {
+  .guide-row {
     grid-row: 6;
+    padding-top: 6px;
+  }
+
+  .tile-row {
+    grid-row: 7;
     margin: 0 -8px -8px;
     padding: 8px;
   }
@@ -1851,5 +1938,148 @@ h1 {
   .tile-thumb canvas {
     width: 32px;
     height: 32px;
+  }
+}
+
+/* ---------- Noise Lab ---------- */
+
+.noiselab {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 2px 0 0 2px;
+}
+
+.noiselab-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.noiselab-tab.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.noiselab-blurb {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.noiselab-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.noiselab-controls {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  scrollbar-width: none;
+}
+
+.noiselab-controls::-webkit-scrollbar {
+  display: none;
+}
+
+.noiselab-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.noiselab-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.noiselab-control select {
+  font: inherit;
+  border: 1px solid var(--ink);
+  background: var(--surface-2);
+  padding: 4px;
+}
+
+.noiselab-control code {
+  color: var(--ink);
+}
+
+.noiselab-control em {
+  color: var(--danger);
+  font-style: normal;
+}
+
+.noiselab-transport {
+  margin-top: 4px;
+  display: flex;
+  gap: 8px;
+}
+
+.noiselab-stage {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.noiselab-canvas-wrap {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ink);
+  box-shadow: var(--shadow);
+  background:
+    repeating-conic-gradient(#d7d5cb 0% 25%, #c8c6bb 0% 50%)
+    0 0 / 20px 20px;
+  overflow: hidden;
+}
+
+.noiselab-canvas-wrap canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+.noiselab-info {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+@media (max-width: 900px) {
+  .noiselab-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .noiselab-controls {
+    order: 2;
+    max-height: 40dvh;
+  }
+
+  .noiselab-stage {
+    order: 1;
+    min-height: 200px;
   }
 }

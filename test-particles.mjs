@@ -77,4 +77,44 @@ const animation = context.createAnimation("legacy", true);
 const legacy = context.encodeBinaryAsset(animation);
 assert.equal(new DataView(legacy.buffer).getUint16(4, true), 1, "existing assets stay TGAS v1");
 
-console.log("particle editor asset tests passed");
+const tileset = context.createTileset("gray_tiles");
+tileset.tiles[0].splice(0, 10, 0, 1, 2, 10, 137, 265, 3, 9, 266, 10.5);
+const normalizedTileset = context.normalizeAsset(tileset);
+assert.deepEqual(
+  plain(normalizedTileset.tiles[0].slice(0, 10)),
+  [0, 1, 2, 10, 137, 265, 0, 0, 0, 0],
+  "tilesets preserve grayscale cells and clear unsupported values",
+);
+
+const encodedTileset = context.encodeBinaryAsset(tileset);
+const tilesetView = new DataView(encodedTileset.buffer, encodedTileset.byteOffset, encodedTileset.byteLength);
+assert.equal(tilesetView.getUint16(4, true), 1, "grayscale tilesets stay TGAS v1");
+assert.equal(tilesetView.getUint8(6), 1);
+const decodedTileset = context.decodeBinaryAsset(encodedTileset, "gray_tiles_imported");
+assert.deepEqual(
+  plain(decodedTileset.tiles[0].slice(0, 10)),
+  [0, 1, 2, 10, 137, 265, 0, 0, 0, 0],
+  "grayscale tileset cells survive binary round-trip",
+);
+
+const invalidTileset = new Uint8Array(encodedTileset);
+new DataView(invalidTileset.buffer).setUint16(18 + 1 + 4 * 2, 266, true);
+assert.equal(
+  context.decodeBinaryAsset(invalidTileset, "invalid_gray").tiles[0][4],
+  0,
+  "invalid imported grayscale cells normalize to transparent",
+);
+
+const paintedGray = vm.runInContext(`
+  state.grayMin = 127;
+  state.grayMax = 127;
+  state.grayScale = "single";
+  state.opacityMin = 100;
+  state.opacityMax = 100;
+  state.opacityScale = "single";
+  state.color = grayPixel(127);
+  strokePixelForCell({ type: "tileset" }, 0, 0, 1, 1, {}, Pixel.Transparent);
+`, context);
+assert.equal(paintedGray, 137, "tileset painting uses the grayscale brush path");
+
+console.log("editor asset tests passed");
