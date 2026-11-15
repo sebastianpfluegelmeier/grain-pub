@@ -1,0 +1,392 @@
+/* Animation view (docs/animation-graph-plan.md 6.1). Studio has no global
+   [hidden] rule, and the grid below would otherwise override the attribute. */
+#animation-view[hidden] { display: none; }
+#animation-view {
+  flex: 1; min-height: 0; min-width: 0;
+  display: grid;
+  --anim-list-column: minmax(160px, var(--anim-list-width, 192px)); --anim-list-gap: 24px;
+  --anim-graph-column: minmax(220px, var(--anim-graph-width, 32%)); --anim-graph-gap: 24px; --anim-canvas-min: 240px;
+  grid-template-columns: var(--anim-list-column) var(--anim-list-gap) minmax(var(--anim-canvas-min), 1fr) var(--anim-graph-gap) var(--anim-graph-column);
+  grid-template-rows: minmax(160px, 1fr) 16px minmax(96px, var(--anim-timeline-height, 168px));
+}
+/* Panels hidden with the toggles of a collapsible view (small screens). */
+#animation-view.anim-list-hidden { --anim-list-column: 0px; --anim-list-gap: 0px; }
+#animation-view.anim-list-hidden .anim-list { display: none; }
+#animation-view.anim-graph-hidden { --anim-graph-column: 0px; --anim-graph-gap: 0px; }
+#animation-view.anim-graph-hidden :is(.anim-graph-area, .anim-divider[data-resize="graph"]) { display: none; }
+/* In the full-height layout <main> is a grid; the view takes all of it. */
+main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -1; }
+
+#animation-view-toggle { display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; padding: 6px; color: var(--muted); }
+#animation-view-toggle[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+
+.anim-list { grid-column: 1; grid-row: 1; min-height: 0; display: flex; flex-direction: column; }
+.anim-list-header { display: flex; align-items: center; gap: 8px; height: 32px; flex-shrink: 0; border-bottom: 1px dotted var(--line); }
+.anim-list-header h2 { margin: 0 auto 0 0; font-size: 13px; font-weight: 500; }
+.anim-list-header button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 6px; color: var(--muted); }
+.anim-list-header button:hover { color: var(--text); }
+.anim-list-items { flex: 1; min-height: 0; overflow: auto; padding-top: 8px; }
+.anim-folder + .anim-folder { margin-top: 16px; }
+.anim-folder h3 { margin: 0 0 4px; font-size: 11px; font-weight: 400; color: var(--muted); }
+.anim-item { border-bottom: 1px dotted var(--line); }
+.anim-item-name { display: block; width: 100%; padding: 8px 4px; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.anim-item-name { position: relative; padding-right: 20px; }
+/* The open animation is marked like the selected option of a Studio menu. */
+.anim-item-name[aria-pressed="true"]::after { content: ''; position: absolute; right: 6px; top: 50%; width: 6px; height: 6px; margin-top: -3px; background: var(--accent); }
+.anim-rename { width: 100%; padding: 8px 4px; font-size: 13px; }
+.anim-item-error { margin: 0 4px 8px; color: var(--error-text); font: 10px/1.5 var(--mono); overflow-wrap: anywhere; text-transform: none; }
+.anim-item-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 4px 4px 8px; }
+.anim-item-actions button { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-item-actions button:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); }
+.anim-item-actions .danger { color: var(--error-text); }
+.anim-empty { margin: 8px 4px; color: var(--muted); font-size: 12px; }
+
+.anim-canvas-area { grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+.anim-document { min-height: 32px; flex-shrink: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0 24px; border-bottom: 1px dotted var(--line); }
+.anim-document .anim-empty { margin: 0; }
+.anim-document-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; margin-right: auto; line-height: 32px; }
+.anim-document-title h2 { margin: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
+.anim-document-size { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
+.anim-document-title button { padding: 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-document-title button:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); }
+.anim-panel-toggle { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-panel-toggle:hover { color: var(--text); background: transparent; }
+.anim-panel-toggle[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-fps { flex-direction: row; align-items: center; gap: 8px; font-size: 11px; white-space: nowrap; }
+.anim-fps input { width: 48px; padding: 4px 2px; font-size: 12px; }
+.anim-conflict { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; padding: 8px 12px; background: var(--error-bg); border: 1px solid var(--error-border); }
+.anim-conflict p { margin: 0 auto 0 0; color: var(--error-text); font-size: 12px; }
+.anim-conflict button { padding: 4px 0; color: var(--text); font-size: 11px; border-bottom: 1px solid var(--muted); }
+
+.anim-region { min-width: 0; min-height: 0; position: relative; }
+/* The dividers are dragged in script, also with a finger. */
+.anim-divider { touch-action: none; }
+/* Studio's scrollbar tracks are panel grey; this view has no panels. */
+#animation-view ::-webkit-scrollbar-track, #animation-view ::-webkit-scrollbar-corner { background: transparent; }
+#animation-view ::-webkit-scrollbar-thumb { border-color: var(--bg); }
+#anim-canvas { flex: 1; }
+/* Transparent pixels show a checkerboard barely lighter than the black stage. */
+#animation-view { --anim-checker-a: #191c1d; --anim-checker-b: #0d0f10; --anim-grid: rgba(255, 255, 255, 0.14); }
+:root[data-theme="light"] #animation-view { --anim-checker-a: #e9e8e2; --anim-checker-b: #d5d4cd; --anim-grid: rgba(0, 0, 0, 0.16); }
+.anim-divider[data-resize="graph"] { grid-column: 4; grid-row: 1; }
+.anim-graph-area { grid-column: 5; grid-row: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+#anim-graph { flex: 1; }
+/* A fixed share, so selecting something never resizes the graph under the pointer. */
+.anim-details { flex: 0 0 clamp(176px, 42%, 304px); overflow: auto; padding: 12px 0 0; border-top: 1px dotted var(--line); }
+.anim-details:empty { display: none; }
+.anim-divider[data-resize="timeline"] { grid-column: 1 / -1; grid-row: 2; }
+.anim-timeline { grid-column: 1 / -1; grid-row: 3; display: flex; flex-direction: column; }
+
+/* Graph view (6.4). State names are case-sensitive, so they keep their case
+   inside the lowercase interface. */
+.anim-graph { display: flex; flex-direction: column; overflow: hidden; }
+.anim-graph-toolbar { display: flex; align-items: center; gap: 0 16px; flex-shrink: 0; height: 32px; overflow: hidden; border-bottom: 1px dotted var(--line); }
+.anim-graph-toolbar button, .anim-details button { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-graph-toolbar button:hover:not(:disabled), .anim-details button:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); }
+.anim-graph-status { flex: 1; min-width: 0; margin: 0; color: var(--muted); font: 10px/1.5 var(--mono); text-align: right; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.anim-graph-canvas { display: block; flex: 1; min-height: 0; width: 100%; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.anim-graph-canvas:focus { outline: none; }
+.anim-graph-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.anim-graph-canvas text { text-transform: none; }
+.anim-graph-measure, .anim-node-name { font: 12px var(--mono); }
+.anim-graph-measure { visibility: hidden; }
+.anim-graph-empty { position: absolute; left: 0; right: 0; top: 50%; margin: 0; text-align: center; color: var(--muted); font-size: 12px; pointer-events: none; }
+.anim-graph-empty[hidden] { display: none; }
+
+/* States are patcher boxes: a hairline box on the black stage, inlets on
+   the top edge, outlets on the bottom edge. The box is filled with the stage
+   colour so an edge passing behind it does not show through. */
+.anim-node { cursor: move; }
+.anim-node-box { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+.anim-node:hover .anim-node-box { stroke: var(--text); }
+.anim-node.selected .anim-node-box, .anim-node.target .anim-node-box { stroke: var(--accent); stroke-width: 2; }
+.anim-port { fill: var(--muted); }
+.anim-node:hover .anim-port, .anim-node.selected .anim-port { fill: var(--text); }
+.anim-node-name { fill: var(--text); }
+.anim-node-id { fill: var(--muted); font: 10px var(--mono); }
+.anim-handle { cursor: crosshair; }
+.anim-handle-hit { fill: transparent; }
+.anim-handle-port { fill: var(--bg); stroke: var(--muted); stroke-width: 1; }
+.anim-handle:hover .anim-handle-port { fill: var(--accent); stroke: var(--accent); }
+.anim-edge { cursor: pointer; }
+.anim-edge-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; vector-effect: non-scaling-stroke; }
+.anim-edge-line { fill: none; stroke: var(--muted); stroke-width: 1.2; pointer-events: none; }
+.anim-edge.cancelable .anim-edge-line { stroke-dasharray: 4 3; }
+.anim-edge:hover .anim-edge-line { stroke: var(--text); }
+.anim-edge.selected .anim-edge-line, .anim-edge.playing .anim-edge-line { stroke: var(--accent); stroke-width: 2; }
+.anim-edge-label-bg { fill: var(--bg); }
+.anim-edge-label { fill: var(--muted); font: 10px var(--mono); }
+.anim-edge.selected .anim-edge-label, .anim-edge.playing .anim-edge-label { fill: var(--text); }
+.anim-edge-draft { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 2 3; pointer-events: none; }
+.anim-arrow path { fill: var(--muted); }
+.anim-arrow.active path { fill: var(--accent); }
+.anim-graph-canvas.previewing .anim-node { cursor: pointer; }
+/* Preview: the state being headed for gets the accent outline, and the state
+   the machine is at is filled, like Studio's play button while playing. */
+.anim-node.requested .anim-node-box { stroke: var(--accent); stroke-width: 2; }
+.anim-node.current .anim-node-box { fill: var(--accent); stroke: var(--accent); }
+.anim-node.current .anim-node-name, .anim-node.current .anim-node-id, .anim-node.current .anim-port { fill: var(--bg); }
+.anim-graph-rename { position: absolute; z-index: 1; box-sizing: border-box; padding: 0 8px; background: var(--bg); border: 1px solid var(--accent); font: 12px var(--mono); }
+
+/* Details panel and warnings, below the graph. */
+.anim-details { display: flex; flex-direction: column; gap: 16px; font-size: 12px; }
+.anim-details h3 { margin: 0 0 8px; font-size: 13px; font-weight: 400; }
+.anim-details .anim-name { text-transform: none; }
+.anim-details-selection { display: flex; flex-direction: column; gap: 8px; }
+.anim-details-selection h3 { margin: 0; }
+.anim-detail-name input { font-size: 12px; padding: 4px 2px; }
+.anim-detail-id { display: flex; align-items: baseline; gap: 8px; margin: 0; color: var(--muted); }
+.anim-detail-id code { color: var(--text); font: 12px var(--mono); }
+.anim-detail-loops { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.anim-detail-note, .anim-details-hint { margin: 0; color: var(--muted); }
+.anim-detail-new-edge { display: flex; align-items: flex-end; gap: 12px; }
+.anim-detail-new-edge label { flex: 1; min-width: 0; font-size: 11px; }
+.anim-detail-new-edge select { text-transform: none; font-size: 12px; padding: 4px 2px; }
+.anim-details .anim-details-selection h3 button { padding: 0; color: var(--text); font: inherit; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.anim-detail-toggle { display: grid; grid-template-columns: 12px auto; column-gap: 8px; align-items: center; color: var(--text); font-size: 12px; }
+.anim-detail-toggle span { grid-column: 2; color: var(--muted); font-size: 11px; }
+.anim-detail-toggle input { appearance: none; -webkit-appearance: none; width: 12px; height: 12px; margin: 0; padding: 0; border: 1px solid var(--muted); border-radius: 0; background: transparent; cursor: pointer; }
+.anim-detail-toggle input:checked { border-color: var(--accent); padding: 2px; background: var(--accent); background-clip: content-box; }
+.anim-detail-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.anim-details .danger { color: var(--error-text); }
+/* Graph preview (6.7): its controls take the details' place while it runs. */
+.anim-graph-toolbar [data-play-graph][aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-graph-toolbar button[hidden] { display: none; }
+.anim-preview { display: flex; flex-direction: column; gap: 12px; }
+.anim-preview-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.anim-details .anim-preview-actions button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-preview-state { display: flex; flex-direction: column; gap: 4px; min-height: 3em; }
+.anim-preview-state p { margin: 0; line-height: 1.5; }
+.anim-preview-state p:empty { display: none; }
+.anim-preview-state .anim-name { color: var(--text); }
+[data-preview-where] { color: var(--text); }
+[data-preview-heading], .anim-preview-message { color: var(--muted); }
+.anim-preview-message { font: 10px/1.5 var(--mono); text-transform: none; overflow-wrap: anywhere; }
+.anim-preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
+.anim-preview-range, .anim-preview-rate { flex-direction: row; align-items: center; gap: 8px; font-size: 11px; white-space: nowrap; }
+.anim-preview-range input { width: 96px; }
+.anim-preview-range output { min-width: 32px; color: var(--text); font: 11px var(--mono); }
+.anim-preview-rate input { width: 52px; padding: 4px 2px; font-size: 12px; }
+.anim-warnings ul { margin: 0; padding: 0 0 0 16px; color: var(--muted); line-height: 1.5; }
+.anim-warnings .anim-name { color: var(--text); }
+
+/* Drawing canvas (6.6): tools on the left, the stage, colour on the right. */
+.anim-checker { background: repeating-conic-gradient(var(--anim-checker-b) 0 25%, var(--anim-checker-a) 0 50%) 0 0 / 8px 8px; }
+.anim-canvas { display: grid; grid-template-columns: var(--anim-tools-width, 76px) minmax(0, 1fr) minmax(168px, 208px); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.anim-tools { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 4px 0; border-right: 1px dotted var(--line); overflow-y: auto; }
+.anim-tool-group { display: grid; grid-template-columns: repeat(2, 32px); gap: 2px; padding: 6px 0; }
+.anim-tool-group + .anim-tool-group { border-top: 1px dotted var(--line); }
+.anim-tools button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 7px; color: var(--muted); }
+.anim-tools button:hover:not(:disabled) { color: var(--text); }
+.anim-tools button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-stage-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.anim-options { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 0 20px; min-height: 40px; padding: 4px 0; border-bottom: 1px dotted var(--line); overflow: hidden; }
+.anim-options > * { min-height: 32px; }
+.anim-option { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; white-space: nowrap; }
+.anim-option input[type=number] { width: 44px; padding: 4px 2px; font-size: 12px; }
+.anim-option input[type=range] { width: 88px; }
+.anim-option output { min-width: 32px; color: var(--text); font: 11px var(--mono); }
+.anim-option select { padding: 4px 20px 4px 2px; font-size: 12px; }
+.anim-option button, .anim-zoom button[data-canvas-fit] { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-option button:hover:not(:disabled), .anim-zoom button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.anim-scope { margin-left: auto; gap: 12px; }
+.anim-scope label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.anim-scope input[type=number] { width: 44px; }
+.anim-check input { width: auto; margin: 0; }
+.anim-segmented { gap: 12px; }
+.anim-segmented button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-actions { gap: 16px; }
+.anim-option-hint { color: var(--muted); font-size: 11px; }
+.anim-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.anim-display { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.anim-display[hidden] { display: none; }
+.anim-display:focus { outline: none; }
+.anim-display:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.anim-stage.panning .anim-display { cursor: grab; }
+.anim-stage-empty { position: absolute; left: 16px; right: 16px; top: 50%; margin: 0; text-align: center; color: var(--muted); font-size: 12px; }
+.anim-stage-empty[hidden] { display: none; }
+.anim-stage-footer { display: flex; align-items: center; gap: 12px; height: 28px; flex-shrink: 0; padding: 0 12px; border-top: 1px dotted var(--line); color: var(--muted); font: 10px var(--mono); }
+.anim-position { white-space: nowrap; text-transform: none; }
+.anim-canvas-status { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; }
+.anim-zoom { display: flex; align-items: center; gap: 8px; }
+.anim-zoom [data-zoom-level] { min-width: 40px; text-align: center; color: var(--text); }
+.anim-zoom button:not([data-canvas-fit]), .anim-history button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 4px; color: var(--muted); }
+.anim-history { display: flex; align-items: center; gap: 4px; margin-left: -4px; }
+.anim-history button:hover:not(:disabled) { color: var(--text); background: transparent; }
+
+/* Colour (6.6). */
+.anim-colour-panel { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; padding: 8px 12px; border-left: 1px dotted var(--line); }
+.anim-colour-head { display: flex; align-items: flex-end; gap: 12px; }
+.anim-colour-slots { position: relative; flex-shrink: 0; width: 52px; height: 44px; }
+.anim-colour-current { position: absolute; left: 0; top: 0; display: block; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); }
+.anim-colour-second { left: 18px; top: 12px; }
+.anim-colour-current[aria-pressed="true"] { border-color: var(--accent); z-index: 1; }
+.anim-colour-current span { display: block; width: 100%; height: 100%; }
+.anim-colour-swap { align-self: flex-start; padding: 2px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-colour-swap:hover { color: var(--text); background: transparent; }
+.anim-hex { flex: 1; min-width: 0; font-size: 11px; }
+.anim-hex input { font-size: 12px; padding: 4px 2px; }
+.anim-sv { position: relative; flex-shrink: 0; height: 112px; cursor: crosshair; touch-action: none;
+  background: linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, var(--anim-hue, red)); }
+.anim-sv-marker { position: absolute; width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); transform: translate(-50%, -50%); pointer-events: none; }
+.anim-colour-control { font-size: 11px; }
+.anim-colour-pair { display: flex; align-items: center; gap: 8px; }
+.anim-colour-pair input[type=range] { flex: 1; min-width: 0; }
+.anim-colour-pair input[type=number] { width: 52px; flex-shrink: 0; padding: 4px 2px; font-size: 12px; }
+.anim-field-values label { flex: 1; font-size: 11px; }
+.anim-field-values input[type=number] { width: 100%; }
+.anim-colour input[data-hue]::-webkit-slider-runnable-track { height: 8px; background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); }
+.anim-colour input.anim-alpha::-webkit-slider-runnable-track { height: 8px; background: linear-gradient(to right, transparent, var(--anim-alpha-colour, #fff)), repeating-conic-gradient(var(--anim-checker-b) 0 25%, var(--anim-checker-a) 0 50%) 0 0 / 8px 8px; }
+.anim-colour input.anim-grey::-webkit-slider-runnable-track { height: 8px; background: linear-gradient(to right, #000, #fff); }
+.anim-colour input[data-hue]::-webkit-slider-thumb, .anim-colour input.anim-alpha::-webkit-slider-thumb, .anim-colour input.anim-grey::-webkit-slider-thumb { margin-top: -3px; box-shadow: 0 0 0 1px var(--bg); }
+.anim-swatches-head { display: flex; align-items: baseline; justify-content: space-between; }
+.anim-swatches-head h3 { margin: 0; font-size: 12px; font-weight: 400; }
+.anim-swatches-head button { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-swatches-head button:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); background: transparent; }
+.anim-swatches { display: grid; grid-template-columns: repeat(auto-fill, 22px); gap: 6px; margin-top: 8px; }
+.anim-swatch { width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); }
+.anim-swatch span { display: block; width: 100%; height: 100%; }
+.anim-swatch[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.anim-swatches-empty { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 11px; }
+
+/* The graph preview shows the playing frame only. */
+.anim-canvas.previewing { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.anim-canvas.previewing .anim-tools, .anim-canvas.previewing .anim-colour-panel, .anim-canvas.previewing .anim-options { display: none; }
+
+/* A narrow drawing area keeps the stage wide and lays the colour controls
+   out in columns below it. */
+@container (max-width: 480px) {
+  .anim-canvas { grid-template-columns: var(--anim-tools-width, 76px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .anim-tools { grid-row: 2 / -1; }
+  .anim-colour-panel { grid-column: 2; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-items: start; gap: 8px 16px; max-height: 184px; border-left: 0; border-top: 1px dotted var(--line); }
+  .anim-swatches-section { grid-column: 1 / -1; }
+}
+
+/* Frame timeline (6.5). */
+.anim-timeline-part { min-height: 0; }
+.anim-timeline-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 0 20px; flex-shrink: 0; min-height: 32px; border-bottom: 1px dotted var(--line); }
+.anim-timeline-title { margin: 0; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.anim-timeline-title .anim-name, .anim-onion-choice select { text-transform: none; }
+.anim-transport { display: flex; align-items: center; gap: 2px; }
+.anim-play { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 7px; }
+.anim-step { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 32px; padding: 4px; color: var(--muted); }
+.anim-step:hover:not(:disabled) { color: var(--text); background: transparent; }
+.anim-play[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+.anim-frame-count { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
+.anim-timeline-actions, .anim-onion { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; }
+.anim-timeline-actions button, .anim-onion button { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-timeline-actions button:hover:not(:disabled), .anim-onion button:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); background: transparent; }
+.anim-timeline-actions .danger { color: var(--error-text); }
+.anim-onion button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-onion-choice { flex-direction: row; align-items: center; gap: 8px; font-size: 11px; white-space: nowrap; }
+.anim-onion-choice select { max-width: 200px; padding: 4px 20px 4px 2px; font-size: 12px; }
+.anim-strip { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 12px 2px 8px; }
+.anim-strip[hidden] { display: none; }
+.anim-strip:focus { outline: none; }
+.anim-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* A finger scrolls the strip; holding a frame still picks it up (anim-timeline.js). */
+.anim-thumb { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 3px; border: 1px solid transparent; cursor: pointer; touch-action: pan-x; }
+.anim-thumb:hover { border-color: var(--line); }
+.anim-thumb[aria-selected="true"] { border-color: var(--accent); }
+.anim-thumb.dragging { opacity: 0.5; }
+.anim-thumb.drop-before { box-shadow: -4px 0 0 -1px var(--accent); }
+.anim-thumb.drop-after { box-shadow: 4px 0 0 -1px var(--accent); }
+.anim-thumb-image { display: block; height: 64px; max-width: 128px; min-width: 16px; }
+.anim-thumb-image canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; object-fit: contain; }
+.anim-thumb-number { color: var(--muted); font: 10px var(--mono); }
+.anim-timeline-empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.anim-timeline-empty[hidden] { display: none; }
+
+.anim-dialog .field-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.anim-dialog .field-grid label { margin: 0; }
+.anim-dialog[data-resize-dialog] .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.anim-dialog-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.anim-anchors { margin: 12px 0 0; padding: 0; border: 0; }
+.anim-anchors legend { padding: 0; color: var(--muted); font-size: 11px; }
+.anim-anchor-grid { display: grid; grid-template-columns: repeat(3, 28px); gap: 4px; margin-top: 6px; }
+.anim-anchor-grid label { position: relative; display: block; width: 28px; height: 28px; margin: 0; }
+.anim-anchor-grid input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.anim-anchor-grid span { display: block; width: 100%; height: 100%; border: 1px solid var(--line); }
+.anim-anchor-grid input:checked + span { border-color: var(--accent); background: var(--accent); background-clip: content-box; padding: 8px; }
+.anim-anchor-grid input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.anim-dialog .field-error:empty { display: none; }
+.anim-dialog label[hidden] { display: none; }
+
+@media (max-width: 900px) {
+  #animation-view { --anim-list-column: minmax(140px, var(--anim-list-width, 168px)); --anim-list-gap: 12px; --anim-canvas-min: 180px;
+    --anim-graph-column: minmax(180px, var(--anim-graph-width, 34%)); --anim-graph-gap: 12px; }
+  #animation-view .divider { width: 12px; }
+}
+
+/* Touch screens (an iPad): controls of at least 40 px, larger text, larger
+   hit areas in the graph and larger slider thumbs. Fine pointers keep the
+   sizes above. */
+@media (pointer: coarse) {
+  #animation-view { --anim-tools-width: 136px; grid-template-rows: minmax(160px, 1fr) 20px minmax(112px, var(--anim-timeline-height, 168px)); }
+  .anim-list-header, .anim-graph-toolbar, .anim-document, .anim-timeline-bar { min-height: 44px; height: auto; }
+  .anim-list-header h2, .anim-document-title h2, .anim-timeline-title { font-size: 15px; }
+  .anim-document-title { line-height: 44px; }
+  .anim-item-name { min-height: 44px; font-size: 14px; }
+  .anim-rename { min-height: 44px; font-size: 16px; }
+  .anim-empty, .anim-details, .anim-stage-empty, .anim-timeline-empty, .anim-graph-empty { font-size: 14px; }
+
+  /* Icon buttons. */
+  /* Three columns, so all tools fit beside the stage at iPad heights. */
+  .anim-tool-group { grid-template-columns: repeat(3, 40px); gap: 2px; padding: 4px 0; }
+  .anim-tools { padding: 0; }
+  .anim-tools button { width: 40px; height: 40px; padding: 10px; }
+  .anim-position:empty { display: none; }
+  .anim-colour-head { flex-wrap: wrap; }
+  .anim-hex { flex-basis: 100%; }
+  .anim-list-header button, .anim-play, .anim-step, .anim-history button, .anim-zoom button:not([data-canvas-fit]) { width: 44px; min-width: 44px; height: 44px; padding: 11px; }
+  .anim-history { gap: 0; }
+  .anim-transport { gap: 0; }
+
+  /* Text buttons: the hit area grows, the underline style stays. */
+  .anim-item-actions button, .anim-document-title button, .anim-panel-toggle, .anim-graph-toolbar button, .anim-details button,
+  .anim-option button, .anim-zoom button[data-canvas-fit], .anim-timeline-actions button, .anim-onion button, .anim-swatches-head button,
+  .anim-colour-swap, .anim-conflict button, .anim-dialog .dialog-actions button {
+    min-height: 44px; min-width: 40px; font-size: 13px;
+  }
+  .anim-item-actions { gap: 0 20px; }
+  .anim-details .anim-details-selection h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; }
+  .anim-details .anim-details-selection h3 button { min-height: 40px; }
+
+  /* Fields and labels. */
+  .anim-option, .anim-fps, .anim-onion-choice, .anim-preview-range, .anim-preview-rate, .anim-colour-control, .anim-hex,
+  .anim-detail-new-edge label, .anim-detail-toggle span { font-size: 13px; }
+  #animation-view :is(input[type=number], input:not([type]), select), .anim-dialog :is(input, select) { min-height: 40px; font-size: 15px; }
+  .anim-detail-toggle { min-height: 40px; grid-template-columns: 22px auto; font-size: 14px; }
+  .anim-detail-toggle input { width: 22px; height: 22px; }
+  .anim-detail-toggle input:checked { padding: 4px; }
+  .anim-options > * { min-height: 44px; }
+  .anim-option input[type=range], .anim-preview-range input { width: 120px; }
+  .anim-graph-status, .anim-stage-footer, .anim-frame-count, .anim-thumb-number, .anim-document-size, .anim-item-error, .anim-preview-message { font-size: 12px; }
+  .anim-stage-footer { height: 44px; padding: 0 4px; }
+
+  /* Slider thumbs: a larger square on the same hairline track. */
+  #animation-view input[type=range] { height: 40px; }
+  #animation-view input[type=range]::-webkit-slider-thumb { width: 16px; height: 28px; margin-top: -14px; }
+  .anim-colour input[data-hue]::-webkit-slider-thumb, .anim-colour input.anim-alpha::-webkit-slider-thumb, .anim-colour input.anim-grey::-webkit-slider-thumb { margin-top: -10px; }
+
+  /* Colour panel. */
+  .anim-colour-slots { width: 64px; height: 56px; }
+  .anim-colour-current { width: 40px; height: 40px; }
+  .anim-colour-second { left: 24px; top: 16px; }
+  .anim-sv { height: 120px; }
+  .anim-swatches { grid-template-columns: repeat(auto-fill, 36px); gap: 6px; }
+  .anim-swatch { width: 36px; height: 36px; }
+
+  /* Frame thumbnails. */
+  .anim-thumb { min-width: 48px; padding: 4px; }
+  .anim-thumb-image { min-width: 36px; }
+
+  /* Graph: larger targets around the open outlet and along edges. The
+     strokes are in screen pixels, so they do not grow with the zoom. */
+  .anim-handle-hit { stroke: transparent; stroke-width: 18px; vector-effect: non-scaling-stroke; pointer-events: all; }
+  .anim-edge-hit { stroke-width: 28; }
+
+  .anim-anchor-grid { grid-template-columns: repeat(3, 40px); }
+  .anim-anchor-grid label { width: 40px; height: 40px; }
+  .anim-anchor-grid input:checked + span { padding: 12px; }
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- desktop/icon.svg without the rounded frame: home screens round the corners themselves. -->
+  <rect x="0" y="0" width="512" height="512" fill="#1a1d20"/>
+  <g fill="#ef956a">
+    <rect x="102" y="112" width="42" height="42" rx="8"/><rect x="169" y="112" width="42" height="42" rx="8"/><rect x="236" y="112" width="42" height="42" rx="8"/><rect x="303" y="112" width="42" height="42" rx="8"/>
+    <rect x="102" y="179" width="42" height="42" rx="8"/><rect x="169" y="179" width="42" height="42" rx="8"/><rect x="236" y="179" width="42" height="42" rx="8"/><rect x="370" y="179" width="42" height="42" rx="8"/>
+    <rect x="102" y="246" width="42" height="42" rx="8"/><rect x="169" y="246" width="42" height="42" rx="8"/><rect x="303" y="246" width="42" height="42" rx="8"/><rect x="370" y="246" width="42" height="42" rx="8"/>
+    <rect x="102" y="313" width="109" height="42" rx="8"/><rect x="236" y="313" width="176" height="42" rx="8"/>
+    <rect x="102" y="380" width="176" height="20" rx="6" opacity=".5"/><rect x="303" y="380" width="109" height="20" rx="6" opacity=".5"/>
+  </g>
+</svg>

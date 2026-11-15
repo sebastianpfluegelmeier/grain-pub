@@ -1,0 +1,54 @@
+/* The standalone animator page (index.html): the page frame, the header,
+   the storage note and the stacked layout for portrait screens. The editor's
+   own styles, including its touch sizes, are in ../anim-view.css. */
+
+/* The page never scrolls or rubber-bands; the list, the details and the
+   frame strip scroll inside. Pinch and double-tap zoom are off for the page
+   (pan-x pan-y leaves only scrolling); the canvas and the graph handle their
+   own gestures with touch-action: none. */
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
+body.animator {
+  display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px, env(safe-area-inset-left));
+  -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none; }
+
+.animator-header { flex-shrink: 0; height: 48px; padding: 0; }
+/* The drawing gets the room: the graph column starts narrower than in Studio. */
+#animation-view { --anim-graph-column: minmax(240px, var(--anim-graph-width, 27%)); }
+.animator-import { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 12px; }
+.animator-import:hover { color: var(--text); border-bottom-color: var(--muted); background: transparent; }
+.animator-main { flex: 1; min-height: 0; height: auto; padding: 0 0 12px; }
+.animator-main #error { left: 0; bottom: 24px; }
+
+.animator-note { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 4px; border-top: 1px dotted var(--line); }
+.animator-note p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.animator-note button { padding: 4px 0; border: 0; border-bottom: 1px solid var(--muted); color: var(--text); background: transparent; font-size: 11px; }
+
+@media (pointer: coarse) {
+  .animator-header { height: 52px; }
+  .animator-import { min-height: 44px; min-width: 44px; font-size: 14px; }
+  .animator-header #theme-toggle { width: 44px; min-width: 44px; height: 44px; padding: 13px; }
+  .animator-note p { font-size: 13px; }
+  .animator-note button { min-height: 40px; font-size: 13px; border-bottom: 0; text-decoration: underline; text-underline-offset: 4px; }
+}
+
+/* Portrait and narrow screens: the graph and its details sit side by side
+   below the drawing instead of beside it, so the stage keeps the width. */
+@media (orientation: portrait), (max-width: 900px) {
+  #animation-view {
+    --anim-graph-row: minmax(200px, var(--anim-graph-height, 30%)); --anim-graph-row-gap: 16px;
+    grid-template-columns: var(--anim-list-column) var(--anim-list-gap) minmax(0, 1fr);
+    grid-template-rows: minmax(240px, 1fr) var(--anim-graph-row-gap) var(--anim-graph-row) 20px minmax(112px, var(--anim-timeline-height, 200px));
+  }
+  #animation-view.anim-graph-hidden { --anim-graph-row: 0px; --anim-graph-row-gap: 0px; }
+  #animation-view .anim-list { grid-row: 1 / 4; }
+  #animation-view .anim-divider[data-resize="graph"] { display: none; }
+  #animation-view .anim-graph-area { grid-column: 3; grid-row: 3; flex-direction: row; }
+  #animation-view #anim-graph { min-width: 0; }
+  #animation-view .anim-details { flex: 0 0 clamp(220px, 42%, 340px); padding: 8px 0 0 16px; border-top: 0; border-left: 1px dotted var(--line); }
+  #animation-view .anim-divider[data-resize="timeline"] { grid-row: 4; }
+  #animation-view .anim-timeline { grid-row: 5; }
+}
