@@ -7,6 +7,7 @@
 
 import {buildGraph, createMachineState, tick, structureHash, distance, MAX_RATE} from './anim-machine.js';
 import {nodeById} from './anim-model.js';
+import {icon} from './icons.js';
 
 // The defaults of the animation_graph call (section 2.2).
 export const CALL_DEFAULTS = Object.freeze({urgency: 1, rate: 1, loop: true, randomize: false});
@@ -82,8 +83,8 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   panel.setAttribute('aria-label', 'Graph preview');
   panel.innerHTML = `
     <div class="anim-preview-actions">
-      <button data-preview-pause aria-pressed="false" title="Pause or resume the preview (Space)">Pause</button>
-      <button data-preview-restart title="Start again at the requested state, as a rewind does">Restart</button>
+      <button class="anim-icon-button" data-preview-pause aria-pressed="false" aria-label="Pause" title="Pause or resume the preview (Space)">${icon('pause')}</button>
+      <button class="anim-icon-button" data-preview-restart aria-label="Restart" title="Restart: start again at the requested state, as a rewind does">${icon('skip-back')}</button>
       <button data-preview-copy title="Copy the animation_graph call for these settings">Copy call</button>
     </div>
     <div class="anim-preview-state">
@@ -286,7 +287,8 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   function renderControls() {
     const inputs = player.inputs, focused = document.activeElement;
     const pause = $('[data-preview-pause]');
-    pause.textContent = paused ? 'Resume' : 'Pause';
+    const label = paused ? 'Resume' : 'Pause';
+    if (pause.getAttribute('aria-label') !== label || !pause.firstChild) { pause.innerHTML = icon(paused ? 'play' : 'pause');pause.setAttribute('aria-label', label); }
     pause.setAttribute('aria-pressed', String(paused));
     const urgency = $('[data-preview-urgency]');
     if (urgency !== focused) urgency.value = String(inputs.urgency);

@@ -121,7 +121,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
           <button data-zoom-out aria-label="Zoom out" title="Zoom out (−)">${icon('minus')}</button>
           <span data-zoom-level></span>
           <button data-zoom-in aria-label="Zoom in" title="Zoom in (+)">${icon('plus')}</button>
-          <button data-canvas-fit title="Fit the frame into view">Fit</button>
+          <button class="anim-icon-button" data-canvas-fit aria-label="Fit frame" title="Fit the frame into view">${icon('arrows-out-simple')}</button>
         </span>
       </div>
     </div>
@@ -454,7 +454,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       const disabled = editable() ? '' : 'disabled';
       const parts = [];
       if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, 1 to ${MAX_BRUSH} pixels ([ and ])">Size<input type="number" data-size min="${MIN_BRUSH}" max="${MAX_BRUSH}" step="1" ${disabled}></label>`);
-      if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button data-shape="square" title="Square brush">square</button><button data-shape="round" title="Round brush">round</button></span>`);
+      if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button class="anim-icon-button" data-shape="square" aria-label="Square brush" title="Square brush">${icon('shape-square')}</button><button class="anim-icon-button" data-shape="round" aria-label="Round brush" title="Round brush">${icon('shape-round')}</button></span>`);
       if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1" ${disabled}><output data-opacity-value></output></label>`);
       if (options.includes('density')) parts.push(`<label class="anim-option" title="How many pixels of the 4 × 4 dither pattern are drawn">Density<input type="range" data-density min="1" max="100" step="1" ${disabled}><output data-density-value></output></label>`);
       if (options.includes('pressure')) parts.push(`<label class="anim-option" title="What pen pressure changes">Pressure<select data-pressure ${disabled}><option value="off">none</option><option value="size">size</option><option value="opacity">opacity</option></select></label>`);

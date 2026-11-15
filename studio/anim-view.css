@@ -77,6 +77,25 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-divider[data-resize="timeline"] { grid-column: 1 / -1; grid-row: 2; }
 .anim-timeline { grid-column: 1 / -1; grid-row: 3; display: flex; flex-direction: column; }
 
+/* Icon buttons: a symbol, with the action in the tooltip and the accessible
+   name. Text stays only where a symbol would not say enough. */
+#animation-view .anim-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; min-width: 32px; height: 32px; padding: 7px; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; }
+#animation-view .anim-icon-button:hover:not(:disabled) { color: var(--text); background: transparent; border-bottom-color: transparent; }
+#animation-view .anim-icon-button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+#animation-view .anim-icon-button.danger:hover:not(:disabled) { color: var(--error-text); }
+/* A toggle with two symbols shows the second one while it is on. */
+.anim-icon-toggle .ui-icon + .ui-icon, .anim-icon-toggle[aria-pressed="true"] .ui-icon:first-child { display: none; }
+.anim-icon-toggle[aria-pressed="true"] .ui-icon + .ui-icon { display: block; }
+/* Play graph is filled while it runs, like Studio's play button. */
+#animation-view [data-play-graph][aria-pressed="true"] { background: var(--accent); color: var(--bg); border-bottom-color: transparent; }
+#animation-view .anim-item-actions, #animation-view .anim-detail-actions, #animation-view .anim-timeline-actions, #animation-view .anim-preview-actions { gap: 0 4px; align-items: center; }
+#animation-view .anim-graph-toolbar { gap: 0 4px; }
+#animation-view .anim-item-actions [data-use] { margin-left: 8px; }
+#animation-view .anim-segmented { gap: 0; }
+@media (pointer: coarse) {
+  #animation-view .anim-icon-button { width: 44px; min-width: 44px; height: 44px; padding: 12px; }
+}
+
 /* Graph view (6.4). State names are case-sensitive, so they keep their case
    inside the lowercase interface. */
 .anim-graph { display: flex; flex-direction: column; overflow: hidden; }

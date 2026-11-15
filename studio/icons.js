@@ -51,6 +51,14 @@ const icons = {
   "code": "<path d=\"M67.84,92.61,25.37,128l42.47,35.39a6,6,0,1,1-7.68,9.22l-48-40a6,6,0,0,1,0-9.22l48-40a6,6,0,0,1,7.68,9.22Zm176,30.78-48-40a6,6,0,1,0-7.68,9.22L230.63,128l-42.47,35.39a6,6,0,1,0,7.68,9.22l48-40a6,6,0,0,0,0-9.22Zm-81.79-89A6,6,0,0,0,154.36,38l-64,176A6,6,0,0,0,94,221.64a6.15,6.15,0,0,0,2,.36,6,6,0,0,0,5.64-3.95l64-176A6,6,0,0,0,162.05,34.36Z\"/>",
   "x": "<path d=\"M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z\"/>",
   "scissors": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\"><circle cx=\"64\" cy=\"64\" r=\"32\"/><circle cx=\"64\" cy=\"192\" r=\"32\"/><path d=\"M88 88l128 128M88 168 216 40\"/></g>",
+  "stop": "<rect x=\"60\" y=\"60\" width=\"136\" height=\"136\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linejoin=\"round\"/>",
+  "copy": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M88 40h128v128\"/><rect x=\"40\" y=\"88\" width=\"128\" height=\"128\"/></g>",
+  "trash": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M40 64h176M96 64V40h64v24M60 64l10 152h116l10-152M104 108v64M152 108v64\"/></g>",
+  "swap": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M40 92h176M176 52l40 40-40 40M216 164H40M80 124l-40 40 40 40\"/></g>",
+  "onion": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"96\" y=\"96\" width=\"120\" height=\"120\"/><path d=\"M68 160V68h92\" opacity=\".6\"/><path d=\"M40 132V40h92\" opacity=\".32\"/></g>",
+  "list": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\"><path d=\"M40 64h176M40 128h176M40 192h176\"/></g>",
+  "shape-square": "<rect x=\"68\" y=\"68\" width=\"120\" height=\"120\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\"/>",
+  "shape-round": "<circle cx=\"128\" cy=\"128\" r=\"64\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\"/>",
   "sliders-horizontal": "<path d=\"M40,86H74.6a30,30,0,0,0,58.8,0H216a6,6,0,0,0,0-12H133.4a30,30,0,0,0-58.8,0H40a6,6,0,0,0,0,12Zm64-24A18,18,0,1,1,86,80,18,18,0,0,1,104,62ZM216,170H197.4a30,30,0,0,0-58.8,0H40a6,6,0,0,0,0,12h98.6a30,30,0,0,0,58.8,0H216a6,6,0,0,0,0-12Zm-48,24a18,18,0,1,1,18-18A18,18,0,0,1,168,194Z\"/>"
 };
 

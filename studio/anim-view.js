@@ -401,7 +401,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
         return `<div class="anim-item" data-key="${text(keyOf(item))}">
           <button class="anim-item-name" data-open aria-pressed="${selected}" title="${text(item.library + '/' + item.path)}">${text(item.name)}</button>
           ${item.error ? `<p class="anim-item-error">${text(item.error)}</p>` : ''}
-          ${selected ? `<div class="anim-item-actions"><button data-rename>Rename</button><button data-duplicate>Duplicate</button>${onExport ? '<button data-export>Export</button>' : ''}${onUseInTimeline ? `<button data-use ${item.error ? 'disabled' : ''}>Use in timeline</button>` : ''}<button data-delete class="danger">Delete</button></div>` : ''}
+          ${selected ? `<div class="anim-item-actions"><button class="anim-icon-button" data-rename aria-label="Rename" title="Rename">${icon('pen')}</button><button class="anim-icon-button" data-duplicate aria-label="Duplicate" title="Duplicate">${icon('copy')}</button>${onExport ? `<button class="anim-icon-button" data-export aria-label="Export" title="Export as a .grainanim file">${icon('upload-simple')}</button>` : ''}<button class="anim-icon-button danger" data-delete aria-label="Delete" title="Delete">${icon('trash')}</button>${onUseInTimeline ? `<button data-use ${item.error ? 'disabled' : ''}>Use in timeline</button>` : ''}</div>` : ''}
         </div>`;
       }).join('')}
     </section>`).join('') || '';
@@ -416,7 +416,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       return;
     }
     const {doc} = open;
-    const toggle = (kind, label) => `<button class="anim-panel-toggle" data-toggle-panel="${kind}" aria-pressed="${!hidden[kind]}" title="${hidden[kind] ? 'Show' : 'Hide'} the ${label.toLowerCase()}">${label}</button>`;
+    const toggle = (kind, label) => `<button class="anim-icon-button anim-panel-toggle" data-toggle-panel="${kind}" aria-pressed="${!hidden[kind]}" aria-label="${label}" title="${hidden[kind] ? 'Show' : 'Hide'} the ${label.toLowerCase()}">${icon(kind === 'list' ? 'list' : 'animation-graph')}</button>`;
     host.innerHTML = `${collapsible ? toggle('list', 'Animations') : ''}<div class="anim-document-title"><h2>${text(open.name)}</h2><span class="anim-document-size">${doc.width} × ${doc.height} ${doc.format}</span>
       <button data-resize-canvas title="Pad or crop every frame around an anchor" ${conflict ? 'disabled' : ''}>Resize canvas…</button></div>
       ${collapsible ? toggle('graph', 'Graph') : ''}

@@ -5,6 +5,7 @@
 // is one undo step. The selection lives in the session, so the canvas and the
 // frame timeline can follow the selected edge.
 
+import {icon} from './icons.js';
 import {addNode, renameNode, moveNode, deleteNode, addEdge, reverseEdge, setBidirectional, setCancelable,
   duplicateEdge, deleteEdge, graphWarnings, nodeById, edgeById, loopsOf, edgesOf, isLoop} from './anim-model.js';
 
@@ -41,9 +42,9 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   parent.classList.add('anim-graph');
   parent.innerHTML = `
     <div class="anim-graph-toolbar">
-      <button data-add-node title="Add a state in the middle of the graph">Add state</button>
-      <button data-fit title="Fit the whole graph into view">Fit</button>
-      <button data-play-graph aria-pressed="false" title="Preview playback: click a state to request it (Escape leaves)">Play graph</button>
+      <button class="anim-icon-button" data-add-node aria-label="Add state" title="Add a state in the middle of the graph">${icon('plus')}</button>
+      <button class="anim-icon-button" data-fit aria-label="Fit graph" title="Fit the whole graph into view">${icon('arrows-out-simple')}</button>
+      <button class="anim-icon-button anim-icon-toggle" data-play-graph aria-pressed="false" aria-label="Play graph" title="Play graph: click a state to request it (Escape leaves)">${icon('play')}${icon('stop')}</button>
       <p class="anim-graph-status" role="status" aria-live="polite"></p>
     </div>
     <svg class="anim-graph-canvas" tabindex="0" role="application" aria-label="Animation graph. Double-click empty space to add a state, double-click a state to rename it, drag a state to move it. Drag from the open outlet on a state's bottom edge to another state to add an edge, or away and back onto the same state for a loop. Arrow keys select states and edges, Enter renames the selected state, Delete removes the selection.">
@@ -56,7 +57,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     </svg>
     <p class="anim-graph-empty" hidden></p>`;
   const $ = selector => parent.querySelector(selector);
-  const svg = $('svg'), viewport = $('[data-viewport]'), measureText = $('.anim-graph-measure');
+  const svg = $('.anim-graph-canvas'), viewport = $('[data-viewport]'), measureText = $('.anim-graph-measure');
   const statusLine = $('.anim-graph-status'), emptyLine = $('.anim-graph-empty');
 
   // view maps graph units to SVG pixels: screen = graph * k + (x, y).
@@ -406,15 +407,15 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       const others = [...d.nodes].sort((a, b) => a.id - b.id);
       markup += `<section class="anim-details-selection" aria-label="Selected state">
         <label class="anim-detail-name">Name<input data-node-name data-focus="name" value="${text(node.name)}" maxlength="64" autocomplete="off" spellcheck="false" ${disabled}></label>
-        <p class="anim-detail-id">id <code>${node.id}</code><button data-copy-id data-focus="copy" aria-label="Copy id ${node.id}" title="Copy the id for use as state: ${node.id} in code">copy</button></p>
+        <p class="anim-detail-id">id <code>${node.id}</code><button class="anim-icon-button" data-copy-id data-focus="copy" aria-label="Copy id ${node.id}" title="Copy the id for use as state: ${node.id} in code">${icon('copy')}</button></p>
         <h3>Loops</h3>
         ${loops.length ? `<ul class="anim-detail-loops">${loops.map(edge => `<li><button data-select-edge="${edge.id}" data-focus="loop-${edge.id}">${plural(edge.frames.length, 'frame')}${edge.cancelable ? ', cancelable' : ''}</button></li>`).join('')}</ul>`
           : '<p class="anim-detail-note">No loop. Resting here shows nothing.</p>'}
         <div class="anim-detail-new-edge">
           <label>New edge to<select data-edge-target data-focus="target" ${disabled}>${others.map(other => `<option value="${other.id}" ${other.id === node.id ? 'selected' : ''}>${text(other.id === node.id ? other.name + ' (loop)' : other.name)}</option>`).join('')}</select></label>
-          <button data-add-edge data-focus="add-edge" ${disabled}>Add edge</button>
+          <button class="anim-icon-button" data-add-edge data-focus="add-edge" aria-label="Add edge" title="Add this edge" ${disabled}>${icon('plus')}</button>
         </div>
-        <div class="anim-detail-actions"><button data-delete class="danger" data-focus="delete" ${disabled}>Delete state</button></div>
+        <div class="anim-detail-actions"><button class="anim-icon-button danger" data-delete data-focus="delete" aria-label="Delete state" title="Delete this state and its edges" ${disabled}>${icon('trash')}</button></div>
       </section>`;
     } else if (selected?.kind === 'edge') {
       const edge = edgeById(d, selected.id), loop = isLoop(edge);
@@ -425,9 +426,9 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         ${loop ? '' : `<label class="anim-detail-toggle"><input type="checkbox" data-bidirectional data-focus="bidirectional" ${edge.bidirectional ? 'checked' : ''} ${disabled}>Bidirectional<span>also plays backwards, from end to start</span></label>`}
         <label class="anim-detail-toggle"><input type="checkbox" data-cancelable data-focus="cancelable" ${edge.cancelable ? 'checked' : ''} ${disabled}>Cancelable<span>a new request cuts it short</span></label>
         <div class="anim-detail-actions">
-          ${loop ? '' : `<button data-reverse data-focus="reverse" title="Swap start and end, and reverse the frame order" ${disabled}>Reverse</button>`}
-          <button data-duplicate data-focus="duplicate" title="Add a parallel edge with copies of these frames" ${disabled}>Duplicate</button>
-          <button data-delete class="danger" data-focus="delete" ${disabled}>Delete edge</button>
+          ${loop ? '' : `<button class="anim-icon-button" data-reverse data-focus="reverse" aria-label="Reverse" title="Reverse: swap start and end, and reverse the frame order" ${disabled}>${icon('swap')}</button>`}
+          <button class="anim-icon-button" data-duplicate data-focus="duplicate" aria-label="Duplicate" title="Duplicate: add a parallel edge with copies of these frames" ${disabled}>${icon('copy')}</button>
+          <button class="anim-icon-button danger" data-delete data-focus="delete" aria-label="Delete edge" title="Delete this edge" ${disabled}>${icon('trash')}</button>
         </div>
       </section>`;
     } else {

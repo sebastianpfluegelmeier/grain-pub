@@ -8,6 +8,7 @@
 
 import {normalizeColour, toHex, parseHex, hsvToRgb, rgbToHsv, decodeValue, encodeValue} from './anim-paint.js';
 import {addSwatch, removeSwatch} from './anim-model.js';
+import {icon} from './icons.js';
 
 const DEFAULT_COLOUR = [255, 255, 255, 255];
 const DEFAULT_SECOND = [0, 0, 0, 255];
@@ -93,12 +94,12 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
           <button class="anim-colour-current anim-checker" data-slot="first" aria-pressed="true" aria-label="First colour, the paint colour" title="First colour: the paint colour"><span data-current></span></button>
           <button class="anim-colour-current anim-colour-second anim-checker" data-slot="second" aria-pressed="false" aria-label="Second colour, for noise, gradients and value modes" title="Second colour: for noise, gradients and value modes"><span data-current-second></span></button>
         </span>
-        <button class="anim-colour-swap" data-swap aria-label="Swap the two colours" title="Swap the two colours">Swap</button>
+        <button class="anim-icon-button anim-colour-swap" data-swap aria-label="Swap the two colours" title="Swap the two colours">${icon('swap')}</button>
         ${renderedFormat === 'image' ? `<label class="anim-hex">Hex<input data-hex maxlength="9" spellcheck="false" autocomplete="off" aria-label="Colour as hex, #rrggbbaa"></label>` : ''}
       </div>
       ${controls}
       <section class="anim-swatches-section" aria-label="Swatches">
-        <div class="anim-swatches-head"><h3>Swatches</h3><button data-swatch-toggle></button></div>
+        <div class="anim-swatches-head"><h3>Swatches</h3><button class="anim-icon-button" data-swatch-toggle></button></div>
         <div class="anim-swatches" data-swatches role="list"></div>
       </section>`;
   }
@@ -141,7 +142,9 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
     }).join('') || '<p class="anim-swatches-empty">No swatches saved.</p>';
     if (focused) host.querySelector(`[data-swatch="${focused}"]`)?.focus({preventScroll: true});
     const saved = palette.includes(now), toggle = $('[data-swatch-toggle]');
-    toggle.textContent = saved ? 'Remove' : 'Save';
+    const action = saved ? 'Remove swatch' : 'Save swatch';
+    // Rebuilt only on a change, so a press in progress keeps its target.
+    if (toggle.getAttribute('aria-label') !== action) { toggle.innerHTML = icon(saved ? 'minus' : 'plus');toggle.setAttribute('aria-label', action); }
     toggle.title = saved ? 'Remove the paint colour from the swatches' : 'Save the paint colour as a swatch in this animation';
     toggle.disabled = !doc || session.readOnly;
   }

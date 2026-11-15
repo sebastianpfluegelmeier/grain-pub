@@ -192,13 +192,13 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
         </span>
         <span class="anim-frame-count">frame ${f.index + 1} of ${count}</span>
         <span class="anim-timeline-actions">
-          <button data-add-frame data-focus="add" title="New frame after this one (N)" ${disabled}>New</button>
-          <button data-duplicate-frame data-focus="duplicate" title="Duplicate this frame" ${disabled}>Duplicate</button>
-          <button data-delete-frame data-focus="delete" class="danger" title="${count > 1 ? 'Delete this frame' : 'An edge keeps at least one frame'}" ${count > 1 && editable() ? '' : 'disabled'}>Delete</button>
+          <button class="anim-icon-button" data-add-frame data-focus="add" aria-label="New frame" title="New frame after this one (N)" ${disabled}>${icon('plus')}</button>
+          <button class="anim-icon-button" data-duplicate-frame data-focus="duplicate" aria-label="Duplicate frame" title="Duplicate this frame" ${disabled}>${icon('copy')}</button>
+          <button class="anim-icon-button danger" data-delete-frame data-focus="delete" aria-label="Delete frame" title="${count > 1 ? 'Delete this frame' : 'An edge keeps at least one frame'}" ${count > 1 && editable() ? '' : 'disabled'}>${icon('trash')}</button>
         </span>
         ${fps}
         <span class="anim-onion">
-          <button data-onion data-focus="onion" aria-pressed="${onion.on}" title="Show ghosts of neighbouring frames (O)">Onion skin</button>
+          <button class="anim-icon-button" data-onion data-focus="onion" aria-pressed="${onion.on}" aria-label="Onion skin" title="Onion skin: show ghosts of neighbouring frames (O)">${icon('onion')}</button>
           ${onion.on ? `<label class="anim-onion-choice" title="Ghosts on each side">Ghosts<select data-onion-count>${[1, 2, 3].map(value => `<option ${value === onion.count ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
             ${menu('before', before)}${menu('after', after)}` : ''}
         </span>`;
