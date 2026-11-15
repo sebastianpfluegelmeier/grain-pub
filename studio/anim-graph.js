@@ -22,6 +22,13 @@ const MIN_SCALE = 0.2, MAX_SCALE = 3, FIT_MAX_SCALE = 1.5, FIT_PADDING = 32;
 // Used while the graph is hidden or measured without layout (tests).
 const FALLBACK_SIZE = {width: 400, height: 300};
 const DRAG_THRESHOLD = 3;
+// A finger or pen wobbles more than a mouse, so it has to travel further
+// before a press on a state counts as moving it.
+const TOUCH_DRAG_THRESHOLD = 10;
+// Safari on iPad sends no dblclick for touch, so a double-tap is recognised
+// from the pointer events: two short presses that stay in place, close
+// together in time and space. Distances are in screen pixels, times in ms.
+const TAP_SLOP = 10, TAP_TIME = 350, DOUBLE_TAP_TIME = 400, DOUBLE_TAP_REACH = 36;
 const text = value => String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -302,7 +309,8 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     svg.classList.toggle('previewing', Boolean(preview));
     if (!d) { viewport.innerHTML = '';emptyLine.hidden = true;placeRename();return; }
     emptyLine.hidden = d.nodes.length > 0;
-    emptyLine.textContent = session.readOnly ? 'This animation has no states.' : 'Double-click to add a state.';
+    const coarse = globalThis.matchMedia?.('(pointer: coarse)').matches;
+    emptyLine.textContent = session.readOnly ? 'This animation has no states.' : `${coarse ? 'Double-tap' : 'Double-click'} to add a state.`;
     const {boxes, shapes, outs, ins, outlet, inlet} = layout();
     const selected = selection();
     // The selection is kept through the preview but not drawn, because its
@@ -562,6 +570,10 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   // Two fingers pinch and pan the graph. A second finger ends what the first
   // one started (a pan, a move or a new edge) without applying it.
   const touches = new Map();
+  // The press in progress and the last finished tap of a finger or pen, for
+  // recognising double-taps: {time, sx, sy, what}, where `what` is 'empty',
+  // 'node:<id>' or 'other'.
+  let press = null, lastTap = null, doubleTapAt = -Infinity;
   function pinchShape() {
     const [a, b] = [...touches.values()];
     return {sx: (a.sx + b.sx) / 2, sy: (a.sy + b.sy) / 2, spread: Math.max(1, Math.hypot(a.sx - b.sx, a.sy - b.sy))};
@@ -576,6 +588,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         else cancelGesture();
         if (renaming) commitRename(true);
         for (const id of touches.keys()) capture(id);
+        press = null;lastTap = null;
         gesture = {type: 'pinch', start: pinchShape(), view: {...view}};
         autoFit = false;
         render();
@@ -589,6 +602,10 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     if (renaming) commitRename(true);
     const p = pointer(event);
     const handle = event.target.closest?.('[data-handle]'), nodeElement = event.target.closest?.('[data-node]'), edgeElement = event.target.closest?.('[data-edge]');
+    const fingerOrPen = event.pointerType === 'touch' || event.pointerType === 'pen';
+    // The pointer is captured below, so pointerup no longer says what was pressed.
+    press = fingerOrPen ? {pointerId: event.pointerId, time: event.timeStamp, sx: p.sx, sy: p.sy,
+      what: handle || edgeElement ? 'other' : nodeElement ? 'node:' + nodeElement.dataset.node : 'empty'} : null;
     if (preview) {
       if (nodeElement) preview.onRequest?.(Number(nodeElement.dataset.node));
       else gesture = {type: 'pan', pointerId: event.pointerId, origin: p, view: {...view}};
@@ -598,7 +615,8 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     } else if (nodeElement) {
       const id = Number(nodeElement.dataset.node), node = nodeById(doc(), id);
       session.select({kind: 'node', id});
-      if (editable()) gesture = {type: 'move', pointerId: event.pointerId, id, origin: p, start: {x: node.x, y: node.y}, position: {x: node.x, y: node.y}, moved: false};
+      if (editable()) gesture = {type: 'move', pointerId: event.pointerId, id, origin: p, start: {x: node.x, y: node.y}, position: {x: node.x, y: node.y}, moved: false,
+        slop: fingerOrPen ? TOUCH_DRAG_THRESHOLD : DRAG_THRESHOLD};
     } else if (edgeElement) {
       session.select({kind: 'edge', id: Number(edgeElement.dataset.edge)});
     } else {
@@ -627,7 +645,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       view = {...g.view, x: g.view.x + p.sx - g.origin.sx, y: g.view.y + p.sy - g.origin.sy};
       if (p.sx !== g.origin.sx || p.sy !== g.origin.sy) autoFit = false;
     } else if (g.type === 'move') {
-      g.moved ||= Math.hypot(p.sx - g.origin.sx, p.sy - g.origin.sy) > DRAG_THRESHOLD;
+      g.moved ||= Math.hypot(p.sx - g.origin.sx, p.sy - g.origin.sy) > g.slop;
       g.position = {x: g.start.x + p.x - g.origin.x, y: g.start.y + p.y - g.origin.y};
     } else if (g.type === 'edge') {
       g.point = p;
@@ -647,16 +665,53 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       if (touches.size < 2) { for (const id of touches.keys()) release(id);gesture = null; }
       return;
     }
-    if (!gesture || event.pointerId !== gesture.pointerId) return;
-    if (event.type === 'pointercancel') { cancelGesture();return; }
-    const g = gesture;
-    gesture = null;release(event.pointerId);
-    if (g.type === 'move' && g.moved) run(doc => moveNode(doc, g.id, g.position.x, g.position.y));
-    else if (g.type === 'edge') {
-      const target = nodeAt(pointer(event), layout().boxes);
-      if (target && (target.id !== g.from || g.left)) addEdgeBetween(g.from, target.id);
+    const tap = tapOf(event);
+    if (gesture && event.pointerId === gesture.pointerId) {
+      if (event.type === 'pointercancel') { cancelGesture();return; }
+      const g = gesture;
+      gesture = null;release(event.pointerId);
+      if (g.type === 'move' && g.moved) run(doc => moveNode(doc, g.id, g.position.x, g.position.y));
+      else if (g.type === 'edge') {
+        const target = nodeAt(pointer(event), layout().boxes);
+        if (target && (target.id !== g.from || g.left)) addEdgeBetween(g.from, target.id);
+      }
+      render();
     }
-    render();
+    if (tap) handleTap(tap);
+  }
+  // The finished press as a tap, or null when it took too long, travelled
+  // too far or was cancelled.
+  function tapOf(event) {
+    const down = press;
+    if (!down || down.pointerId !== event.pointerId) return null;
+    press = null;
+    if (event.type !== 'pointerup') return null;
+    const p = pointer(event);
+    if (event.timeStamp - down.time > TAP_TIME || Math.hypot(p.sx - down.sx, p.sy - down.sy) > TAP_SLOP) return null;
+    return {time: event.timeStamp, p, what: down.what};
+  }
+  function handleTap(tap) {
+    const previous = lastTap;
+    lastTap = tap;
+    if (!previous || previous.what !== tap.what || tap.time - previous.time > DOUBLE_TAP_TIME
+      || Math.hypot(tap.p.sx - previous.p.sx, tap.p.sy - previous.p.sy) > DOUBLE_TAP_REACH) return;
+    lastTap = null;
+    if (activate(tap.what, tap.p)) doubleTapAt = tap.time;
+  }
+  // What a double-click or a double-tap does: on a state it opens the name
+  // for editing, on empty space it adds a state there.
+  function activate(what, point) {
+    if (!editable() || gesture) return false;
+    if (what.startsWith('node:')) {
+      const id = Number(what.slice(5));
+      if (!nodeById(doc(), id)) return false;
+      session.select({kind: 'node', id});
+      startRename(id);
+      return true;
+    }
+    if (what !== 'empty') return false;
+    addNodeAt(point);
+    return true;
   }
   function cancelGesture() {
     if (!gesture) return false;
@@ -671,16 +726,11 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   svg.addEventListener('lostpointercapture', event => { if (gesture?.pointerId === event.pointerId) cancelGesture(); });
   svg.addEventListener('dblclick', event => {
     event.preventDefault();
-    if (!editable() || gesture) return;
+    // A browser that does send dblclick for touch must not repeat a double-tap
+    // that the pointer events already handled.
+    if (event.timeStamp - doubleTapAt < 700) return;
     const nodeElement = event.target.closest?.('[data-node]');
-    if (nodeElement) {
-      const id = Number(nodeElement.dataset.node);
-      session.select({kind: 'node', id});
-      startRename(id);
-      return;
-    }
-    if (event.target.closest?.('[data-edge],[data-handle]')) return;
-    addNodeAt(pointer(event));
+    activate(nodeElement ? 'node:' + nodeElement.dataset.node : event.target.closest?.('[data-edge],[data-handle]') ? 'other' : 'empty', pointer(event));
   });
   // Ctrl or Cmd with the wheel (and trackpad pinch, which arrives as a
   // Ctrl-wheel) zooms at the pointer; plain scrolling pans.
