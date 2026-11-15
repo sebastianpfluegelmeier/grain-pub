@@ -30,6 +30,11 @@ const TOUCH_DRAG_THRESHOLD = 10;
 // from the pointer events: two short presses that stay in place, close
 // together in time and space. Distances are in screen pixels, times in ms.
 const TAP_SLOP = 10, TAP_TIME = 350, DOUBLE_TAP_TIME = 400, DOUBLE_TAP_REACH = 36;
+// One notch of a mouse wheel reports a delta of about 100, a trackpad a few
+// units per event. Limiting each event keeps a notch to a modest zoom step.
+const WHEEL_ZOOM_LIMIT = 30;
+// Touches this long after pen contact are a resting hand (as on the canvas).
+const PEN_PALM_REJECTION_MS = 800;
 const text = value => String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -279,10 +284,16 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     const k = clamp(Math.min((width - 2 * FIT_PADDING) / (right - left), (height - 2 * FIT_PADDING) / (bottom - top), FIT_MAX_SCALE), MIN_SCALE, MAX_SCALE);
     view = {k, x: width / 2 - (left + right) / 2 * k, y: height / 2 - (top + bottom) / 2 * k};
   }
+  // Panning and zooming change only the transform; the drawing inside stays as it is.
+  function applyView() {
+    viewport.setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.k})`);
+    placeRename();
+  }
   function zoomAt(sx, sy, factor) {
     const k = clamp(view.k * factor, MIN_SCALE, MAX_SCALE);
     view = {k, x: sx - (sx - view.x) * k / view.k, y: sy - (sy - view.y) * k / view.k};
-    render();
+    autoFit = false;
+    applyView();
   }
   // A free spot near the middle of the visible area for a new state.
   function freeSpot() {
@@ -378,9 +389,8 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       }
       markup += `<path class="anim-edge-draft" d="${roundedPath(points)}" marker-end="url(#${uid}-arrow-active)"/>`;
     }
-    viewport.setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.k})`);
     viewport.innerHTML = markup;
-    placeRename();
+    applyView();
   }
 
   // Details panel and warnings ----------------------------------------------------
@@ -569,8 +579,14 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   const capture = id => { try { svg.setPointerCapture?.(id); } catch {} };
   const release = id => { try { if (svg.hasPointerCapture?.(id)) svg.releasePointerCapture(id); } catch {} };
   // Two fingers pinch and pan the graph. A second finger ends what the first
-  // one started (a pan, a move or a new edge) without applying it.
+  // one started (a pan, a move or a new edge) without applying it. A finger
+  // stays captured until it lifts: the shape it first touched is redrawn
+  // away under it, and without the capture its pointerup would never reach
+  // the graph.
   const touches = new Map();
+  // The view before the fingers now on the graph touched it, and the time
+  // until which new touches count as a resting hand.
+  let beforeTouch = null, penUntil = 0;
   // The press in progress and the last finished tap of a finger or pen, for
   // recognising double-taps: {time, sx, sy, what}, where `what` is 'empty',
   // 'node:<id>' or 'other'.
@@ -579,18 +595,41 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     const [a, b] = [...touches.values()];
     return {sx: (a.sx + b.sx) / 2, sy: (a.sy + b.sy) / 2, spread: Math.max(1, Math.hypot(a.sx - b.sx, a.sy - b.sy))};
   }
+  // Forgets the fingers on the graph and ends what they were doing without
+  // applying it. `restore` also takes back their panning and zooming.
+  function dropTouches(restore) {
+    touches.clear();press = null;lastTap = null;
+    if (gesture?.pointerType === 'touch') gesture = null;
+    if (restore && beforeTouch) { view = beforeTouch.view;autoFit = beforeTouch.autoFit; }
+    beforeTouch = null;
+    render();
+  }
+  // A hand resting on the graph while the pen draws must not pan or zoom it.
+  // Pen contact anywhere on the page takes back what the fingers on the graph
+  // have done, and touches shortly after it are ignored.
+  function onPen(event) {
+    if (event.pointerType !== 'pen' || (event.type === 'pointermove' && !(event.buttons > 0 || event.pressure > 0))) return;
+    penUntil = Date.now() + PEN_PALM_REJECTION_MS;
+    if (touches.size) dropTouches(true);
+  }
+  const penEvents = ['pointerdown', 'pointermove', 'pointerup'];
+  for (const type of penEvents) globalThis.addEventListener?.(type, onPen, true);
   svg.addEventListener('pointerdown', event => {
     if (event.pointerType === 'touch' && doc()) {
+      if (Date.now() < penUntil) return;
+      // A primary touch is the only finger on the screen, so a finger still
+      // recorded here has lost its pointerup. It must not turn this press
+      // into a pinch.
+      if (event.isPrimary && touches.size) dropTouches(false);
+      if (!touches.size) beforeTouch = {view: {...view}, autoFit};
       touches.set(event.pointerId, pointer(event));
-      // Captured, so the finger's pointerup reaches the graph wherever it lifts.
       capture(event.pointerId);
       if (touches.size === 2) {
-        if (gesture?.type === 'pan') { release(gesture.pointerId);gesture = null; }
+        if (gesture?.type === 'pan') gesture = null;
         else cancelGesture();
         if (renaming) commitRename(true);
-        for (const id of touches.keys()) capture(id);
         press = null;lastTap = null;
-        gesture = {type: 'pinch', start: pinchShape(), view: {...view}};
+        gesture = {type: 'pinch', pointerType: 'touch', shape: pinchShape()};
         autoFit = false;
         render();
         return;
@@ -607,44 +646,52 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     // The pointer is captured below, so pointerup no longer says what was pressed.
     press = fingerOrPen ? {pointerId: event.pointerId, time: event.timeStamp, sx: p.sx, sy: p.sy,
       what: handle || edgeElement ? 'other' : nodeElement ? 'node:' + nodeElement.dataset.node : 'empty'} : null;
+    const slop = fingerOrPen ? TOUCH_DRAG_THRESHOLD : DRAG_THRESHOLD;
+    // A press on empty space pans once it has moved, so a tap leaves the view
+    // alone. Only a press that stays in place clears the selection: the
+    // selected edge is what the canvas shows, and looking around the graph
+    // must not take it away.
+    const pan = deselect => ({type: 'pan', pointerId: event.pointerId, origin: p, view: {...view}, moved: false, slop, deselect});
     if (preview) {
       if (nodeElement) preview.onRequest?.(Number(nodeElement.dataset.node));
-      else gesture = {type: 'pan', pointerId: event.pointerId, origin: p, view: {...view}};
+      else gesture = pan(false);
     } else if (handle && editable()) {
       const from = Number(handle.dataset.handle);
       gesture = {type: 'edge', pointerId: event.pointerId, from, point: p, target: null, left: false};
     } else if (nodeElement) {
       const id = Number(nodeElement.dataset.node), node = nodeById(doc(), id);
       session.select({kind: 'node', id});
-      if (editable()) gesture = {type: 'move', pointerId: event.pointerId, id, origin: p, start: {x: node.x, y: node.y}, position: {x: node.x, y: node.y}, moved: false,
-        slop: fingerOrPen ? TOUCH_DRAG_THRESHOLD : DRAG_THRESHOLD};
+      if (editable()) gesture = {type: 'move', pointerId: event.pointerId, id, origin: p, start: {x: node.x, y: node.y}, position: {x: node.x, y: node.y}, moved: false, slop};
     } else if (edgeElement) {
       session.select({kind: 'edge', id: Number(edgeElement.dataset.edge)});
-    } else {
-      session.select(null);
-      gesture = {type: 'pan', pointerId: event.pointerId, origin: p, view: {...view}};
-    }
+    } else gesture = pan(true);
     // Refitting while a state or an edge is dragged would move the drawing under the pointer.
     if (gesture && gesture.type !== 'pan') autoFit = false;
-    if (gesture) { capture(event.pointerId);render(); }
+    if (gesture) { gesture.pointerType = event.pointerType;capture(event.pointerId);render(); }
   });
   svg.addEventListener('pointermove', event => {
     if (touches.has(event.pointerId)) touches.set(event.pointerId, pointer(event));
     if (gesture?.type === 'pinch') {
       if (!touches.has(event.pointerId) || touches.size < 2) return;
-      // The graph point under the fingers' first midpoint stays under their midpoint.
-      const {start, view: from} = gesture, now = pinchShape();
-      const k = clamp(from.k * now.spread / start.spread, MIN_SCALE, MAX_SCALE);
-      const gx = (start.sx - from.x) / from.k, gy = (start.sy - from.y) / from.k;
-      view = {k, x: now.sx - gx * k, y: now.sy - gy * k};
-      render();
+      // The graph point under the fingers' midpoint stays under it, and the
+      // scale follows their distance. Each step starts from the one before,
+      // so a finger that joins or leaves causes no jump.
+      const from = gesture.shape, now = pinchShape();
+      const k = clamp(view.k * now.spread / from.spread, MIN_SCALE, MAX_SCALE);
+      view = {k, x: now.sx - (from.sx - view.x) * k / view.k, y: now.sy - (from.sy - view.y) * k / view.k};
+      gesture.shape = now;
+      applyView();
       return;
     }
     if (!gesture || event.pointerId !== gesture.pointerId) return;
     const p = pointer(event), g = gesture;
     if (g.type === 'pan') {
+      g.moved ||= Math.hypot(p.sx - g.origin.sx, p.sy - g.origin.sy) > g.slop;
+      if (!g.moved) return;
       view = {...g.view, x: g.view.x + p.sx - g.origin.sx, y: g.view.y + p.sy - g.origin.sy};
-      if (p.sx !== g.origin.sx || p.sy !== g.origin.sy) autoFit = false;
+      autoFit = false;
+      applyView();
+      return;
     } else if (g.type === 'move') {
       g.moved ||= Math.hypot(p.sx - g.origin.sx, p.sy - g.origin.sy) > g.slop;
       g.position = {x: g.start.x + p.x - g.origin.x, y: g.start.y + p.y - g.origin.y};
@@ -660,10 +707,15 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   });
   function finish(event) {
     touches.delete(event.pointerId);
+    if (!touches.size) beforeTouch = null;
     if (gesture?.type === 'pinch') {
       release(event.pointerId);
-      // Lifting one finger ends the pinch; the other one does nothing more.
-      if (touches.size < 2) { for (const id of touches.keys()) release(id);gesture = null; }
+      // The fingers still down carry on: two keep pinching, one pans.
+      if (touches.size >= 2) gesture.shape = pinchShape();
+      else if (touches.size === 1) {
+        const [[pointerId, origin]] = touches;
+        gesture = {type: 'pan', pointerType: 'touch', pointerId, origin, view: {...view}, moved: true, slop: 0, deselect: false};
+      } else gesture = null;
       return;
     }
     const tap = tapOf(event);
@@ -672,6 +724,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       const g = gesture;
       gesture = null;release(event.pointerId);
       if (g.type === 'move' && g.moved) run(doc => moveNode(doc, g.id, g.position.x, g.position.y));
+      else if (g.type === 'pan' && g.deselect && !g.moved) session.select(null);
       else if (g.type === 'edge') {
         const target = nodeAt(pointer(event), layout().boxes);
         if (target && (target.id !== g.from || g.left)) addEdgeBetween(g.from, target.id);
@@ -717,7 +770,8 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   function cancelGesture() {
     if (!gesture) return false;
     const g = gesture;
-    gesture = null;release(g.pointerId);
+    gesture = null;
+    if (g.pointerType !== 'touch') release(g.pointerId);
     if (g.type === 'pan') view = g.view;
     render();
     return true;
@@ -740,9 +794,21 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     event.preventDefault();
     const p = pointer(event);
     autoFit = false;
-    if (event.ctrlKey || event.metaKey) zoomAt(p.sx, p.sy, Math.exp(-event.deltaY * 0.01));
-    else { view = {...view, x: view.x - event.deltaX, y: view.y - event.deltaY};render(); }
+    if (event.ctrlKey || event.metaKey) zoomAt(p.sx, p.sy, Math.exp(-clamp(event.deltaY, -WHEEL_ZOOM_LIMIT, WHEEL_ZOOM_LIMIT) * 0.01));
+    else { view = {...view, x: view.x - event.deltaX, y: view.y - event.deltaY};applyView(); }
   }, {passive: false});
+  // Safari and the desktop app report a trackpad pinch as gesture events
+  // instead of a Ctrl-wheel. A touch screen sends them for two fingers too,
+  // which are handled through their pointers above, so they are left alone there.
+  let pinchFrom = null;
+  svg.addEventListener('gesturestart', event => { event.preventDefault();pinchFrom = doc() && !(globalThis.navigator?.maxTouchPoints > 0) ? view.k : null; }, {passive: false});
+  svg.addEventListener('gesturechange', event => {
+    event.preventDefault();
+    if (pinchFrom === null || !(event.scale > 0)) return;
+    const p = Number.isFinite(event.clientX) ? pointer(event) : {sx: width / 2, sy: height / 2};
+    zoomAt(p.sx, p.sy, pinchFrom * event.scale / view.k);
+  }, {passive: false});
+  svg.addEventListener('gestureend', event => { event.preventDefault();pinchFrom = null; }, {passive: false});
   $('[data-add-node]').addEventListener('click', () => { if (editable()) { measure();addNodeAt(freeSpot()); } });
   $('[data-fit]').addEventListener('click', () => fit());
   $('[data-play-graph]').addEventListener('click', () => onPlayGraph());
@@ -823,6 +889,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     },
     destroy() {
       observer?.disconnect();
+      for (const type of penEvents) globalThis.removeEventListener?.(type, onPen, true);
       cancelGesture();cancelRename();
       parent.replaceChildren();details.replaceChildren();
     },

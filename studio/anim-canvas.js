@@ -17,6 +17,17 @@ export const ZOOM_MAX = 64;
 export const ZOOM_STEPS = [0.25, 0.5, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
 // Grid lines appear from this many screen pixels per frame pixel.
 const GRID_SCALE = 8;
+// One notch of a mouse wheel reports a delta of about 100, a trackpad a few
+// units per event. Limiting each event keeps a notch to a modest zoom step.
+const WHEEL_ZOOM_LIMIT = 30;
+// The frame is drawn through an enlarged copy at fractional zooms (see
+// drawPixels); the copy is skipped when it would hold more pixels than this.
+const SHARP_PIXELS_MAX = 4_000_000;
+// The size slider is exponential: equal travel multiplies the size by the
+// same factor, so the small sizes pixel work needs take most of the track.
+const SIZE_SLIDER_MAX = 1000;
+const sizeFromSlider = value => Math.round(MIN_BRUSH * (MAX_BRUSH / MIN_BRUSH) ** (clamp(Number(value) || 0, 0, SIZE_SLIDER_MAX) / SIZE_SLIDER_MAX));
+const sliderFromSize = size => Math.round(Math.log(size / MIN_BRUSH) / Math.log(MAX_BRUSH / MIN_BRUSH) * SIZE_SLIDER_MAX);
 // Touch and pen handling, as in the asset editor.
 export const TOUCH_DRAW_THRESHOLD = 6;
 export const PEN_PALM_REJECTION_MS = 800;
@@ -144,6 +155,9 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   let width = FALLBACK_SIZE.width, height = FALLBACK_SIZE.height;
   let gesture = null, hover = null, preview = null, drawPending = false, destroyed = false;
   let spaceHeld = false, spaceUsed = false, penUntil = 0;
+  // True while the size slider is dragged: the footprint is then shown in the
+  // middle of the stage, because a finger has no hover position to show it at.
+  let sizing = false;
   const touch = {mode: 'idle', pointers: new Map(), primaryId: null, start: null, centroid: null, spread: null, blockDrawing: false};
 
   const picker = createColourPicker({parent: $('[data-colour]'), session, onChange: () => requestDraw(), onMessage: message});
@@ -228,9 +242,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   function fitView() {
     const d = doc();
     if (!d) return;
-    let k = Math.min((width - 2 * FIT_PADDING) / d.width, (height - 2 * FIT_PADDING) / d.height);
-    // Whole steps keep every frame pixel the same size on screen.
-    k = clamp(k >= 1 ? Math.floor(k) : k, ZOOM_MIN, ZOOM_MAX);
+    // The frame fills the stage, whatever scale that takes.
+    const k = clamp(Math.min((width - 2 * FIT_PADDING) / d.width, (height - 2 * FIT_PADDING) / d.height), ZOOM_MIN, ZOOM_MAX);
     view = {k, x: Math.round((width - d.width * k) / 2), y: Math.round((height - d.height * k) / 2)};
   }
   // Pans back when the frame would leave the stage entirely, so it can
@@ -307,6 +320,30 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     ghostContext.putImageData(ghostImage, 0, 0);
     return true;
   }
+  // Draws a frame-sized canvas at the view's scale. With a whole number of
+  // screen pixels per frame pixel, nearest-neighbour scaling is exact. In
+  // between it would give frame pixels of unequal size, so the frame is first
+  // enlarged by the next whole factor and then scaled down smoothly: every
+  // pixel keeps the same size and gets a soft edge instead.
+  const sharpCanvas = document.createElement('canvas');
+  function drawPixels(ctx, source, x, y, w, h, scale) {
+    const whole = Math.max(1, Math.ceil(scale - 1e-6));
+    const sharpContext = Math.abs(scale - Math.round(scale)) < 1e-6 || source.width * whole * source.height * whole > SHARP_PIXELS_MAX ? null : sharpCanvas.getContext?.('2d') ?? null;
+    if (!sharpContext) { ctx.imageSmoothingEnabled = false;ctx.drawImage(source, x, y, w, h);return; }
+    let from = source;
+    if (whole > 1) {
+      const sharpWidth = source.width * whole, sharpHeight = source.height * whole;
+      if (sharpCanvas.width !== sharpWidth || sharpCanvas.height !== sharpHeight) { sharpCanvas.width = sharpWidth;sharpCanvas.height = sharpHeight; }
+      else sharpContext.clearRect(0, 0, sharpWidth, sharpHeight);
+      sharpContext.imageSmoothingEnabled = false;
+      sharpContext.drawImage(source, 0, 0, sharpWidth, sharpHeight);
+      from = sharpCanvas;
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = scale < 1 ? 'high' : 'low';
+    ctx.drawImage(from, x, y, w, h);
+    ctx.imageSmoothingEnabled = false;
+  }
   function requestDraw() {
     if (drawPending) return;
     drawPending = true;
@@ -362,24 +399,28 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     // A Field is opaque everywhere, so its ghosts go over the frame; in the
     // other formats they show through the transparent parts, under it.
     const ghostsOnTop = d.format === 'field';
-    if (hasGhosts && !ghostsOnTop) ctx.drawImage(ghostCanvas, x, y, w, h);
-    ctx.drawImage(frameCanvas, x, y, w, h);
-    if (hasGhosts && ghostsOnTop) { ctx.globalAlpha = 0.8;ctx.drawImage(ghostCanvas, x, y, w, h);ctx.globalAlpha = 1; }
+    if (hasGhosts && !ghostsOnTop) drawPixels(ctx, ghostCanvas, x, y, w, h, k * dpr);
+    drawPixels(ctx, frameCanvas, x, y, w, h, k * dpr);
+    if (hasGhosts && ghostsOnTop) { ctx.globalAlpha = 0.8;drawPixels(ctx, ghostCanvas, x, y, w, h, k * dpr);ctx.globalAlpha = 1; }
     const hairline = 1 / dpr;
     if (k >= GRID_SCALE) {
       ctx.fillStyle = token('--anim-grid', 'rgba(128, 128, 128, 0.35)');
-      for (let column = 1; column < d.width; column++) { const gx = x + column * k;if (gx >= 0 && gx <= width) ctx.fillRect(gx, Math.max(y, 0), hairline, Math.min(h, height)); }
-      for (let row = 1; row < d.height; row++) { const gy = y + row * k;if (gy >= 0 && gy <= height) ctx.fillRect(Math.max(x, 0), gy, Math.min(w, width), hairline); }
+      // Each line sits on a whole screen pixel, so the grid stays one crisp
+      // hairline at fractional zooms.
+      const snap = value => Math.round(value * dpr) / dpr;
+      for (let column = 1; column < d.width; column++) { const gx = snap(x + column * k);if (gx >= 0 && gx <= width) ctx.fillRect(gx, Math.max(y, 0), hairline, Math.min(h, height)); }
+      for (let row = 1; row < d.height; row++) { const gy = snap(y + row * k);if (gy >= 0 && gy <= height) ctx.fillRect(Math.max(x, 0), gy, Math.min(w, width), hairline); }
     }
     ctx.strokeStyle = token('--line', '#343a3b');ctx.lineWidth = 1;
     ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
     const shown = gesture?.type === 'move' ? gesture.shown : gesture?.type === 'marquee' ? gesture.rect : selection;
     if (shown) outline(ctx, [[shown.x, shown.y, shown.x + shown.w, shown.y + shown.h]], true);
-    if (hover && !gesture?.type?.match?.(/pan|marquee|move/) && editable()) {
+    if (hover && !sizing && !gesture?.type?.match?.(/pan|marquee|move/) && editable()) {
       const t = tool();
       const cells = t.kind === 'stroke' || (t.kind === 'drag' && t.id === 'line') ? footprint(brushSize(), brush.shape) : footprint(1);
       outline(ctx, footprintEdges(cells, hover.x, hover.y), false);
     }
+    if (sizing && editable()) outline(ctx, footprintEdges(footprint(brushSize(), brush.shape), Math.floor((width / 2 - x) / k), Math.floor((height / 2 - y) / k)), false);
   }
   // Draws rectangles or edge segments (in frame pixels) as a dark and a light
   // line, visible on any colour.
@@ -453,7 +494,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       renderedOptions = key;
       const disabled = editable() ? '' : 'disabled';
       const parts = [];
-      if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, 1 to ${MAX_BRUSH} pixels ([ and ])">Size<input type="number" data-size min="${MIN_BRUSH}" max="${MAX_BRUSH}" step="1" ${disabled}></label>`);
+      if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])">Size<input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1" ${disabled}><output data-size-value></output></label>`);
       if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button class="anim-icon-button" data-shape="square" aria-label="Square brush" title="Square brush">${icon('shape-square')}</button><button class="anim-icon-button" data-shape="round" aria-label="Round brush" title="Round brush">${icon('shape-round')}</button></span>`);
       if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1" ${disabled}><output data-opacity-value></output></label>`);
       if (options.includes('density')) parts.push(`<label class="anim-option" title="How many pixels of the 4 × 4 dither pattern are drawn">Density<input type="range" data-density min="1" max="100" step="1" ${disabled}><output data-density-value></output></label>`);
@@ -491,8 +532,14 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       host.innerHTML = parts.join('');
     }
     const active = document.activeElement;
+    // The thumb is moved only when it does not already stand for the size:
+    // many positions give the same size, and a dragged thumb must stay under
+    // the finger.
     const size = host.querySelector('[data-size]');
-    if (size && size !== active) size.value = String(brush.size);
+    if (size && sizeFromSlider(size.value) !== brush.size) size.value = String(sliderFromSize(brush.size));
+    if (size) size.setAttribute('aria-valuetext', `${brush.size} ${brush.size === 1 ? 'pixel' : 'pixels'}`);
+    const sizeValue = host.querySelector('[data-size-value]');
+    if (sizeValue) sizeValue.textContent = String(brush.size);
     for (const button of host.querySelectorAll('[data-shape]')) button.setAttribute('aria-pressed', String(button.dataset.shape === brush.shape));
     const opacity = host.querySelector('[data-opacity]');
     if (opacity && opacity !== active) opacity.value = String(Math.round(brush.opacity * 100));
@@ -866,7 +913,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     event.preventDefault();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? height : 1;
     const p = locate(event);
-    if (event.ctrlKey || event.metaKey) zoomAt(p.sx, p.sy, view.k * Math.exp(-event.deltaY * unit * 0.01));
+    if (event.ctrlKey || event.metaKey) zoomAt(p.sx, p.sy, view.k * Math.exp(-clamp(event.deltaY * unit, -WHEEL_ZOOM_LIMIT, WHEEL_ZOOM_LIMIT) * 0.01));
     else {
       let dx = event.deltaX * unit, dy = event.deltaY * unit;
       if (event.shiftKey && !dx) { dx = dy;dy = 0; }
@@ -875,6 +922,19 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       requestDraw();
     }
   }, {passive: false});
+  // Safari and the desktop app report a trackpad pinch as gesture events
+  // instead of a Ctrl-wheel. A touch screen sends them for two fingers too,
+  // which are handled through their pointers above, so they are left alone there.
+  let pinchFrom = null;
+  const trackpadPinch = () => Boolean(doc()) && !(globalThis.navigator?.maxTouchPoints > 0);
+  display.addEventListener('gesturestart', event => { event.preventDefault();pinchFrom = trackpadPinch() ? view.k : null; }, {passive: false});
+  display.addEventListener('gesturechange', event => {
+    event.preventDefault();
+    if (pinchFrom === null || !(event.scale > 0)) return;
+    const p = locate(event);
+    zoomAt(p.sx, p.sy, pinchFrom * event.scale);
+  }, {passive: false});
+  display.addEventListener('gestureend', event => { event.preventDefault();pinchFrom = null; }, {passive: false});
   function showPosition(p) {
     const s = surfaceOf(frameId());
     if (!s || !inside(s, p.x, p.y)) { positionLine.textContent = '';return; }
@@ -906,12 +966,24 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   });
   $('[data-options]').addEventListener('input', event => {
     const input = event.target;
-    if (input.matches('[data-opacity]')) { brush.opacity = clamp(Number(input.value) / 100, 0.01, 1);renderOptions(); }
+    if (input.matches('[data-size]')) { sizing = true;setBrushSize(sizeFromSlider(input.value)); }
+    else if (input.matches('[data-opacity]')) { brush.opacity = clamp(Number(input.value) / 100, 0.01, 1);renderOptions(); }
     else if (input.matches('[data-density]')) { brush.density = clamp(Math.round(Number(input.value)) || brush.density, 1, 100);renderOptions(); }
   });
+  // The slider's own arrow keys would move it a thousandth of the track;
+  // they step the size by one pixel instead.
+  $('[data-options]').addEventListener('keydown', event => {
+    const step = event.target.matches?.('[data-size]') && {ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1}[event.key];
+    if (!step) return;
+    event.preventDefault();
+    setBrushSize(brush.size + step);
+  });
+  // A thumb put back where it started sends no change event, so the end of
+  // the press and the loss of focus also end the size preview.
+  for (const type of ['pointerup', 'pointercancel', 'focusout']) $('[data-options]').addEventListener(type, () => { if (sizing) { sizing = false;requestDraw(); } });
   $('[data-options]').addEventListener('change', event => {
     const input = event.target;
-    if (input.matches('[data-size]')) { setBrushSize(input.value);input.value = String(brush.size); }
+    if (input.matches('[data-size]')) { sizing = false;requestDraw(); }
     else if (input.matches('[data-pressure]')) brush.pressure = ['off', 'size', 'opacity'].includes(input.value) ? input.value : 'off';
     else if (input.matches('[data-mode]')) setBrush({modes: {[input.dataset.mode]: input.value}});
     else if (input.matches('[data-tween-mode]')) { tweenMode = TWEEN_MODES.includes(input.value) ? input.value : 'dissolve'; }
