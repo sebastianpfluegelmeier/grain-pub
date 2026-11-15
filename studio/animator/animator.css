@@ -53,6 +53,7 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
 .animator-note button { padding: 4px 0; border: 0; border-bottom: 1px solid var(--muted); color: var(--text); background: transparent; font-size: 11px; }
 
 @media (pointer: coarse) {
+  #animation-view { --anim-document-row: 45px; }
   .animator-header { height: 52px; }
   .animator-import { min-height: 44px; min-width: 44px; font-size: 14px; }
   .animator-header #theme-toggle { width: 44px; min-width: 44px; height: 44px; padding: 13px; }
@@ -68,20 +69,29 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
   .animator-note button { min-height: 40px; font-size: 13px; border-bottom: 0; text-decoration: underline; text-underline-offset: 4px; }
 }
 
-/* Portrait and narrow screens: the graph and its details sit side by side
-   below the drawing instead of beside it, so the stage keeps the width. */
+/* Portrait and narrow screens stack the editor in the order it is used:
+   the drawing on top, its frames right under it, and the graph with the
+   details beside it at the bottom. The animations list slides over the
+   drawing instead of taking a column from it. */
 @media (orientation: portrait), (max-width: 900px) {
   #animation-view {
-    --anim-graph-row: minmax(200px, var(--anim-graph-height, 30%)); --anim-graph-row-gap: 16px;
-    grid-template-columns: var(--anim-list-column) var(--anim-list-gap) minmax(0, 1fr);
-    grid-template-rows: minmax(240px, 1fr) var(--anim-graph-row-gap) var(--anim-graph-row) 20px minmax(112px, var(--anim-timeline-height, 200px));
+    position: relative;
+    --anim-graph-row: minmax(160px, var(--anim-graph-height, 26%)); --anim-graph-row-gap: 20px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(240px, 1fr) 20px minmax(112px, var(--anim-timeline-height, 168px)) var(--anim-graph-row-gap) var(--anim-graph-row);
   }
   #animation-view.anim-graph-hidden { --anim-graph-row: 0px; --anim-graph-row-gap: 0px; }
-  #animation-view .anim-list { grid-row: 1 / 4; }
-  #animation-view .anim-divider[data-resize="graph"] { display: none; }
-  #animation-view .anim-graph-area { grid-column: 3; grid-row: 3; flex-direction: row; }
+  /* Below the row with its own toggle, which must stay reachable to close it. */
+  #animation-view .anim-list { position: absolute; z-index: 5; left: 0; top: var(--anim-document-row, 33px); bottom: 0; width: min(280px, 82%); padding-right: 16px; background: var(--bg); border-right: 1px dotted var(--line); }
+  /* With nothing open there is no toggle and nothing to cover. */
+  #animation-view:not(.anim-list-hidden):not(:has(.anim-document-title)) .anim-list { top: 0; }
+  #animation-view .anim-canvas-area { grid-column: 1; grid-row: 1; }
+  #animation-view .anim-divider[data-resize="timeline"] { grid-column: 1; grid-row: 2; }
+  #animation-view .anim-timeline { grid-column: 1; grid-row: 3; }
+  /* The graph's border lies flat here and sets the graph's height. */
+  #animation-view .anim-divider[data-resize="graph"] { grid-column: 1; grid-row: 4; width: auto; height: 20px; cursor: row-resize; border-top: 1px dotted var(--line); }
+  #animation-view .anim-divider[data-resize="graph"]:hover::after { inset: 9px 45%; }
+  #animation-view .anim-graph-area { grid-column: 1; grid-row: 5; flex-direction: row; }
   #animation-view #anim-graph { min-width: 0; }
-  #animation-view .anim-details { flex: 0 0 clamp(220px, 42%, 340px); padding: 8px 0 0 16px; border-top: 0; border-left: 1px dotted var(--line); }
-  #animation-view .anim-divider[data-resize="timeline"] { grid-row: 4; }
-  #animation-view .anim-timeline { grid-row: 5; }
+  #animation-view .anim-details { flex: 0 0 clamp(220px, 40%, 340px); padding: 0 0 0 16px; border-top: 0; border-left: 1px dotted var(--line); }
 }

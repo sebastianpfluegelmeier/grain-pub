@@ -460,7 +460,12 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     const node = event.target.closest('.anim-item');
     const item = node && items.find(entry => keyOf(entry) === node.dataset.key);
     if (!item) return;
-    if (event.target.closest('[data-open]')) await openItem(item);
+    if (event.target.closest('[data-open]')) {
+      await openItem(item);
+      // Where the list lies over the drawing (stacked layouts), picking an
+      // animation puts it away again.
+      if (collapsible && open && !hidden.list && globalThis.getComputedStyle?.(regions.list).position === 'absolute') togglePanel('list');
+    }
     else if (event.target.closest('[data-rename]')) startRename(item, node);
     else if (event.target.closest('[data-duplicate]')) await duplicate(item);
     else if (event.target.closest('[data-use]')) await useInTimeline(item);
@@ -551,32 +556,42 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   parent.addEventListener('keydown', event => { handleKey(event);event.stopPropagation(); });
 
   // Draggable borders, as in the workspace dividers. Sizes are kept per browser.
-  const sizes = {graph: ['--anim-graph-width', 220, 'clientX'], timeline: ['--anim-timeline-height', 96, 'clientY']};
+  // Each is [custom property, smallest size, room left for the rest].
+  const sizes = {graph: ['--anim-graph-width', 220, 480], graphHeight: ['--anim-graph-height', 140, 420], timeline: ['--anim-timeline-height', 96, 200]};
   function setSize(kind, value) {
-    const [property, minimum] = sizes[kind], box = parent.getBoundingClientRect();
-    const maximum = kind === 'graph' ? box.width - 480 : box.height - 200;
+    const [property, minimum, rest] = sizes[kind], box = parent.getBoundingClientRect();
+    const maximum = (kind === 'graph' ? box.width : box.height) - rest;
     const size = Math.round(Math.max(minimum, Math.min(Math.max(minimum, maximum), value)));
     parent.style.setProperty(property, size + 'px');
     try { storage?.setItem('studio-' + property.slice(2), String(size)); } catch {}
   }
-  for (const [kind, [property]] of Object.entries(sizes)) {
+  for (const [property] of Object.values(sizes)) {
     try { const stored = Number(storage?.getItem('studio-' + property.slice(2)));if (stored > 0) parent.style.setProperty(property, stored + 'px'); } catch {}
   }
   for (const handle of parent.querySelectorAll('[data-resize]')) {
-    const kind = handle.dataset.resize;
-    const measure = () => kind === 'graph' ? $('.anim-graph-area').getBoundingClientRect().width : regions.timeline.getBoundingClientRect().height;
+    // A stacked layout (portrait) puts the graph below the frames; its border
+    // then lies flat and sets the graph's height instead of its width.
+    const target = () => {
+      if (handle.dataset.resize !== 'graph') return 'timeline';
+      const rect = handle.getBoundingClientRect();
+      return rect.width > rect.height ? 'graphHeight' : 'graph';
+    };
+    const measure = kind => kind === 'timeline' ? regions.timeline.getBoundingClientRect().height
+      : $('.anim-graph-area').getBoundingClientRect()[kind === 'graph' ? 'width' : 'height'];
     handle.onpointerdown = event => {
       if (event.button !== 0) return;
       event.preventDefault();
-      const box = parent.getBoundingClientRect();
-      const move = e => setSize(kind, kind === 'graph' ? box.right - e.clientX : box.bottom - e.clientY);
+      const kind = target(), box = parent.getBoundingClientRect();
+      // The frames do not reach the view's bottom edge in a stacked layout.
+      const timelineBottom = regions.timeline.getBoundingClientRect().bottom;
+      const move = e => setSize(kind, kind === 'graph' ? box.right - e.clientX : kind === 'graphHeight' ? box.bottom - e.clientY : timelineBottom - e.clientY);
       const end = () => { document.removeEventListener('pointermove', move);document.removeEventListener('pointerup', end);document.removeEventListener('pointercancel', end); };
       document.addEventListener('pointermove', move);document.addEventListener('pointerup', end);document.addEventListener('pointercancel', end);
     };
     handle.onkeydown = event => {
-      const keys = kind === 'graph' ? {ArrowLeft: 20, ArrowRight: -20} : {ArrowUp: 20, ArrowDown: -20};
+      const kind = target(), keys = kind === 'graph' ? {ArrowLeft: 20, ArrowRight: -20} : {ArrowUp: 20, ArrowDown: -20};
       if (!(event.key in keys)) return;
-      event.preventDefault();setSize(kind, measure() + keys[event.key]);
+      event.preventDefault();setSize(kind, measure(kind) + keys[event.key]);
     };
   }
 
