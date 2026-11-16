@@ -208,15 +208,18 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-stepper input::-webkit-inner-spin-button, .anim-stepper input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .anim-grid-step { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; color: var(--muted); font-size: 11px; }
 .anim-grid-step input { width: 40px; padding: 4px 2px; font-size: 12px; text-align: center; }
-.anim-tools button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 7px; color: var(--muted); }
-.anim-tools button:hover:not(:disabled) { color: var(--text); }
-.anim-tools button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+:is(.anim-tools, .anim-guides) button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 7px; color: var(--muted); }
+:is(.anim-tools, .anim-guides) button:hover:not(:disabled) { color: var(--text); }
+:is(.anim-tools, .anim-guides) button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-guides .anim-stepper button { width: 24px; height: 28px; padding: 4px; }
 .anim-stage-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.anim-options { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 0 20px; min-height: 40px; padding: 4px 0; border-bottom: 1px dotted var(--line); overflow: hidden; }
+.anim-settings { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 0 12px; border-bottom: 1px dotted var(--line); }
+.anim-options { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0 16px; min-height: 40px; padding: 4px 0; overflow: hidden; }
+.anim-grid-step[hidden] { display: none; }
 .anim-options > * { min-height: 32px; }
 .anim-option { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; white-space: nowrap; }
 .anim-option input[type=number] { width: 44px; padding: 4px 2px; font-size: 12px; }
-.anim-option input[type=range] { width: 88px; }
+.anim-option input[type=range] { width: 72px; }
 .anim-option output { min-width: 32px; color: var(--text); font: 11px var(--mono); }
 .anim-option select { padding: 4px 20px 4px 2px; font-size: 12px; }
 /* A control that cannot be used now looks it, so it does not seem broken. */
@@ -225,10 +228,6 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-brush-preview { flex: none; width: 60px; height: 24px; background: var(--text); mask-size: 100% 100%; -webkit-mask-size: 100% 100%; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; image-rendering: pixelated; }
 .anim-option button, .anim-zoom button[data-canvas-fit] { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
 .anim-option button:hover:not(:disabled), .anim-zoom button:hover:not(:disabled) { color: var(--text); background: transparent; }
-.anim-scope { margin-left: auto; gap: 12px; }
-.anim-scope label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
-.anim-scope input[type=number] { width: 44px; }
-.anim-check input { width: auto; margin: 0; }
 .anim-segmented { gap: 12px; }
 .anim-segmented button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
 .anim-actions { gap: 16px; }
@@ -287,7 +286,7 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 
 /* The graph preview shows the playing frame only. */
 .anim-canvas.previewing { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-.anim-canvas.previewing .anim-tools, .anim-canvas.previewing .anim-colour-panel, .anim-canvas.previewing .anim-options { display: none; }
+.anim-canvas.previewing :is(.anim-tools, .anim-colour-panel, .anim-settings) { display: none; }
 
 /* A narrow drawing area keeps the stage wide and lays the colour controls
    out in columns below it. */
@@ -365,11 +364,20 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-empty, .anim-details, .anim-stage-empty, .anim-timeline-empty, .anim-graph-empty { font-size: 14px; }
 
   /* Icon buttons. */
-  .anim-tools button { width: 40px; height: 40px; padding: 10px; }
+  :is(.anim-tools, .anim-guides) button { width: 40px; height: 40px; padding: 10px; }
   .anim-grid-step input { width: 48px; min-height: 40px; font-size: 16px; }
-  .anim-stepper button, .anim-tools .anim-stepper button { width: 36px; height: 40px; padding: 9px; }
+  .anim-stepper button, :is(.anim-tools, .anim-guides) .anim-stepper button { width: 36px; height: 40px; padding: 9px; }
   .studio-option { min-height: 44px; padding-top: 12px; padding-bottom: 12px; font-size: 14px; }
   .studio-option[aria-selected="true"]::after { top: 19px; }
+  /* Tools on one row, guides and options on the next, on a portrait tablet. */
+  .anim-options { gap: 0 12px; }
+  .anim-option { gap: 6px; }
+  .anim-option output { min-width: 0; }
+  /* A symbol stands for the name of an option; the name stays for screen readers and as the tooltip. */
+  .anim-option-name { font-size: 0; }
+  .anim-option-name::before { content: attr(data-symbol); font-size: 17px; color: var(--muted); }
+  .anim-brush-preview { width: 44px; }
+  .anim-grid-step input { width: 40px; }
   /* Tighter, so the bar stays on one row on a portrait tablet. */
   .anim-timeline-bar { gap: 0 10px; }
   .anim-position:empty { display: none; }
@@ -397,7 +405,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-detail-toggle input { width: 22px; height: 22px; }
   .anim-detail-toggle input:checked { padding: 4px; }
   .anim-options > * { min-height: 44px; }
-  .anim-option input[type=range], .anim-preview-range input { width: 120px; }
+  .anim-option input[type=range] { width: 88px; }
+  .anim-preview-range input { width: 120px; }
   .anim-graph-status, .anim-stage-footer, .anim-frame-count, .anim-thumb-number, .anim-document-size, .anim-item-error, .anim-preview-message { font-size: 12px; }
   .anim-stage-footer { height: 44px; padding: 0 4px; }
 

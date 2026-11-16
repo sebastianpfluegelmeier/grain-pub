@@ -59,14 +59,14 @@ export const TOOL_GROUPS = [
   {id: 'retouch', label: 'Retouch'},
   {id: 'frame', label: 'Selection and frames'},
 ];
-const BRUSH_OPTIONS = ['size', 'shape', 'opacity', 'pressure'];
+const BRUSH_OPTIONS = ['size', 'shape', 'opacity'];
 // The pen and the eraser choose a brush type instead of a shape; the type's
 // own options (density) are added when it has them.
-const TYPED_OPTIONS = ['type', 'size', 'opacity', 'pressure'];
+const TYPED_OPTIONS = ['type', 'size', 'opacity'];
 export const TOOLS = [
-  {id: 'pen', group: 'brushes', label: 'Pen', key: 'B', icon: 'pen', kind: 'stroke', paint: true, stamp: stampBrush, options: [...TYPED_OPTIONS, 'values']},
+  {id: 'pen', group: 'brushes', label: 'Pen', key: 'B', icon: 'pen', kind: 'stroke', paint: true, stamp: stampBrush, options: TYPED_OPTIONS},
   {id: 'eraser', group: 'brushes', label: 'Eraser', key: 'E', icon: 'eraser', kind: 'stroke', paint: true, erase: true, stamp: stampBrush, options: TYPED_OPTIONS},
-  {id: 'line', group: 'shapes', label: 'Line', key: 'L', icon: 'line', kind: 'drag', paint: true, options: ['size', 'shape', 'opacity', 'values'],
+  {id: 'line', group: 'shapes', label: 'Line', key: 'L', icon: 'line', kind: 'drag', paint: true, options: ['size', 'shape', 'opacity'],
     draw: (stroke, from, to) => { stroke.gradient = {from, to};strokeLine(stroke, from, to); }},
   {id: 'rectangle', group: 'shapes', label: 'Filled rectangle', key: 'R', icon: 'rectangle', kind: 'drag', paint: true, options: ['opacity'],
     draw: (stroke, from, to) => strokeRect(stroke, from, to)},
@@ -88,14 +88,6 @@ export const SCOPES = [
   ['edge', 'Whole edge'],
 ];
 export const MAX_SCOPE_RADIUS = 16;
-const MODE_LABELS = {fixed: 'Fixed', random: 'Random', along: 'Along stroke', 'radial-out': 'Radial out', 'radial-in': 'Radial in'};
-const MODE_TITLES = {
-  fixed: 'Always the first colour',
-  random: 'A random place between the first and the second colour for every pixel',
-  along: 'From the first colour where the stroke starts to the second where the pointer is',
-  'radial-out': 'The first colour at the brush centre, the second at its edge',
-  'radial-in': 'The second colour at the brush centre, the first at its edge',
-};
 // Guides: a coarse grid, centre lines and snapping for the shape tools. They
 // are settings of the editor, kept in local storage and never written into
 // an animation.
@@ -154,15 +146,17 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
         <button data-transform="flip-y" aria-label="Flip the frame vertically" title="Flip the frame vertically">${icon('flip-vertical')}</button>
         <button data-transform="rotate" aria-label="Rotate the frame 90° clockwise" title="Rotate the frame 90° clockwise">${icon('rotate-clockwise')}</button>
       </div>
+    </div>
+    <div class="anim-settings">
       <div class="anim-tool-group anim-guides" role="group" aria-label="Guides">
         <button data-guide="grid" aria-pressed="false" aria-label="Grid" title="Show the grid">${icon('grid')}</button>
-        <span class="anim-grid-step"><input type="number" data-grid-step="gridW" min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid width in pixels" title="Grid width in pixels"><span aria-hidden="true">×</span><input type="number" data-grid-step="gridH" min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid height in pixels" title="Grid height in pixels"></span>
+        <span class="anim-grid-step"><input type="number" data-grid-step min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid size in pixels" title="Grid size in pixels"></span>
         <button data-guide="centre" aria-pressed="false" aria-label="Centre lines" title="Show the centre lines">${icon('centre-lines')}</button>
         <button data-guide="snap" aria-pressed="false" aria-label="Snap line, rectangle and gradient" title="Snap line, rectangle and gradient to the grid, the sides and the centre lines">${icon('magnet')}</button>
         <button data-guide="corners" aria-pressed="false" aria-label="Snap to drawn corners" title="Snap line, rectangle and gradient to the corners of what is drawn">${icon('corner-snap')}</button>
       </div>
+      <div class="anim-options" data-options></div>
     </div>
-    <div class="anim-options" data-options></div>
     <div class="anim-stage-column">
       <div class="anim-stage" data-stage>
         <canvas class="anim-display" tabindex="0" role="application" aria-label="Drawing canvas. B pen, E eraser, L line, R rectangle, G fill, I eyedropper, M select. Right-click erases, Alt-click takes a colour, hold Space and drag to pan."></canvas>
@@ -549,7 +543,9 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     const rotateButton = $('[data-transform="rotate"]');
     rotateButton.title = d && !canRotate(d) ? 'Rotate needs a square canvas' : 'Rotate the frame 90° clockwise';
     for (const button of parent.querySelectorAll('[data-guide]')) button.setAttribute('aria-pressed', String(guides[button.dataset.guide]));
-    for (const input of parent.querySelectorAll('[data-grid-step]')) if (document.activeElement !== input) input.value = String(guides[input.dataset.gridStep]);
+    // The grid size only matters while the grid is shown or snapped to.
+    $('.anim-grid-step').hidden = !(guides.grid || guides.snap);
+    for (const input of parent.querySelectorAll('[data-grid-step]')) if (document.activeElement !== input) input.value = String(guides.gridW);
     for (const button of parent.querySelectorAll('.anim-zoom button')) button.disabled = !d;
     $('[data-undo]').disabled = !session.canUndo;
     $('[data-redo]').disabled = !session.canRedo;
@@ -563,7 +559,6 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   }
   // The options bar is rebuilt only when the tool, the format or the scope
   // changes, so a dragged slider keeps its pointer.
-  const optionLabel = (d, channel) => channel === 'alpha' ? 'Alpha' : d?.format === 'field' ? 'Value' : d?.format === 'matte' ? 'Grey' : 'Colour';
   function renderOptions() {
     const t = tool(), d = doc(), type = typeOf(t);
     const options = preview || !d ? [] : type?.density ? [...t.options, 'density'] : t.options;
@@ -575,17 +570,11 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       // can be set up before an edge is selected. What acts on a frame is off.
       const disabled = editable() ? '' : 'disabled';
       const parts = [];
-      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints">Type<select data-brush-type>${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}" data-preview="${typePreview(item.id)}">${item.label}</option>`).join('')}</select><span class="anim-brush-preview" data-brush-preview aria-hidden="true"></span></label>`);
-      if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])">Size<input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1"><output data-size-value></output></label>`);
+      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints"><select data-brush-type aria-label="Brush type">${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}" data-preview="${typePreview(item.id)}">${item.label}</option>`).join('')}</select><span class="anim-brush-preview" data-brush-preview aria-hidden="true"></span></label>`);
+      if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])"><span class="anim-option-name" data-symbol="⌀">Size</span><input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1"><output data-size-value></output></label>`);
       if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button class="anim-icon-button" data-shape="square" aria-label="Square brush" title="Square brush">${icon('shape-square')}</button><button class="anim-icon-button" data-shape="round" aria-label="Round brush" title="Round brush">${icon('shape-round')}</button></span>`);
-      if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1"><output data-opacity-value></output></label>`);
-      if (options.includes('density')) parts.push(`<label class="anim-option" title="How dense the pattern of the brush type is">Density<input type="range" data-density min="1" max="100" step="1"><output data-density-value></output></label>`);
-      if (options.includes('pressure')) parts.push(`<label class="anim-option" title="What pen pressure changes">Pressure<select data-pressure><option value="off">none</option><option value="size">size</option><option value="opacity">opacity</option></select></label>`);
-      if (options.includes('values')) {
-        const select = (channel) => `<label class="anim-option" title="Where each pixel lies between the first and the second colour">${optionLabel(d, channel)}<select data-mode="${channel}">${VALUE_MODES.map(mode => `<option value="${mode}" title="${MODE_TITLES[mode]}">${MODE_LABELS[mode]}</option>`).join('')}</select></label>`;
-        parts.push(select('colour'));
-        if (d.format !== 'field') parts.push(select('alpha'));
-      }
+      if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha"><span class="anim-option-name" data-symbol="◐">Opacity</span><input type="range" data-opacity min="1" max="100" step="1"><output data-opacity-value></output></label>`);
+      if (options.includes('density')) parts.push(`<label class="anim-option" title="How dense the pattern of the brush type is"><span class="anim-option-name" data-symbol="▦">Density</span><input type="range" data-density min="1" max="100" step="1"><output data-density-value></output></label>`);
       if (options.includes('clipboard')) {
         parts.push(`<span class="anim-option anim-actions">
           <button data-copy title="Copy the selection (${shortcut('C')})" ${selection && editable() ? '' : 'disabled'}>Copy</button>
@@ -603,14 +592,6 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       if (t.kind === 'shift' && !preview && d) parts.push('<span class="anim-option-hint">Drag to move the whole frame.</span>');
       if (t.kind === 'pick' && !preview && d) parts.push('<span class="anim-option-hint">Click to take a colour. Alt-click does the same with any paint tool.</span>');
       if (t.kind === 'action' && t.id === 'tween' && !preview && d) parts.push('<span class="anim-option-hint">Between this frame and the next drawn one.</span>');
-      if (!preview && d && t.kind !== 'pick' && t.kind !== 'action') {
-        const count = session.frame?.count ?? 1;
-        parts.push(`<span class="anim-option anim-scope" role="group" aria-label="Frames to change">
-          <label title="Which frames of this edge a stroke, fill, shift or flip changes">Frames<select data-scope ${disabled}>${SCOPES.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>
-          ${scope.kind === 'nearby' ? `<label title="How many frames on each side"><span class="anim-scope-label">Reach</span><input type="number" data-radius min="1" max="${Math.max(1, Math.min(MAX_SCOPE_RADIUS, count - 1))}" step="1" ${disabled}></label>
-          <label class="anim-check" title="Strokes fade out with distance from this frame"><input type="checkbox" data-fade ${disabled}>Fade</label>` : ''}
-        </span>`);
-      }
       host.innerHTML = parts.join('');
     }
     const active = document.activeElement;
@@ -635,17 +616,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     if (density && density !== active) density.value = String(brush.density);
     const densityValue = host.querySelector('[data-density-value]');
     if (densityValue) densityValue.textContent = brush.density + '%';
-    const pressure = host.querySelector('[data-pressure]');
-    if (pressure) pressure.value = brush.pressure;
-    for (const select of host.querySelectorAll('[data-mode]')) select.value = brush.modes[select.dataset.mode];
     const tweenSelect = host.querySelector('[data-tween-mode]');
     if (tweenSelect) tweenSelect.value = tweenMode;
-    const scopeSelect = host.querySelector('[data-scope]');
-    if (scopeSelect) scopeSelect.value = scope.kind;
-    const radius = host.querySelector('[data-radius]');
-    if (radius && radius !== active) radius.value = String(scope.radius);
-    const fade = host.querySelector('[data-fade]');
-    if (fade) fade.checked = scope.fade;
   }
   function setTool(id) {
     const next = toolById(id);
@@ -906,7 +878,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // With 'along stroke' values the colour of every pixel depends on where the
   // stroke started and where the pointer is now, so the stroke is painted
   // again from the copy taken at pointer down on every move.
-  const alongMode = () => tool().options.includes('values') && (brush.modes.colour === 'along' || (brush.modes.alpha === 'along' && doc()?.format !== 'field'));
+  const alongMode = () => (brush.modes.colour === 'along' || (brush.modes.alpha === 'along' && doc()?.format !== 'field'));
   function replayStroke(g) {
     g.replay = false;
     const stampFn = tool().stamp ?? stamp, first = g.path[0], last = g.path.at(-1);
@@ -1151,11 +1123,11 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // A half-typed number below the limit waits for the change event.
   parent.querySelector('.anim-guides').addEventListener('input', event => {
     const input = event.target, value = Number(input.value);
-    if (input.matches('[data-grid-step]') && value >= GRID_STEP_MIN && value <= GRID_STEP_MAX) setGuides({[input.dataset.gridStep]: value});
+    if (input.matches('[data-grid-step]') && value >= GRID_STEP_MIN && value <= GRID_STEP_MAX) setGuides({gridW: value, gridH: value});
   });
   parent.querySelector('.anim-guides').addEventListener('change', event => {
     const input = event.target;
-    if (input.matches('[data-grid-step]')) { setGuides({[input.dataset.gridStep]: input.value});input.value = String(guides[input.dataset.gridStep]); }
+    if (input.matches('[data-grid-step]')) { setGuides({gridW: input.value, gridH: input.value});input.value = String(guides.gridW); }
   });
   $('[data-options]').addEventListener('input', event => {
     const input = event.target;
@@ -1178,12 +1150,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     const input = event.target;
     if (input.matches('[data-size]')) { sizing = false;requestDraw(); }
     else if (input.matches('[data-brush-type]')) { setBrushType(input.value);renderOptions();requestDraw(); }
-    else if (input.matches('[data-pressure]')) brush.pressure = ['off', 'size', 'opacity'].includes(input.value) ? input.value : 'off';
-    else if (input.matches('[data-mode]')) setBrush({modes: {[input.dataset.mode]: input.value}});
     else if (input.matches('[data-tween-mode]')) { tweenMode = TWEEN_MODES.includes(input.value) ? input.value : 'dissolve'; }
-    else if (input.matches('[data-scope]')) setScope({kind: input.value});
-    else if (input.matches('[data-radius]')) { setScope({radius: Number(input.value)});input.value = String(scope.radius); }
-    else if (input.matches('[data-fade]')) setScope({fade: input.checked});
   });
 
   function transform(kind) {
