@@ -105,8 +105,7 @@ const toolById = id => TOOLS.find(tool => tool.id === id) ?? TOOLS[0];
 export function createAnimationCanvas({parent, session, onInteract = () => {}, onTogglePlay = () => {}, ghosts = () => []}) {
   parent.classList.add('anim-canvas');
   parent.innerHTML = `
-    <div class="anim-options" data-options></div>
-    <div class="anim-tools" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+    <div class="anim-tools" role="toolbar" aria-label="Tools" aria-orientation="horizontal">
       ${TOOL_GROUPS.map(group => `<div class="anim-tool-group" role="group" aria-label="${group.label}">
         ${TOOLS.filter(tool => tool.group === group.id).map(tool => `<button data-tool="${tool.id}" aria-pressed="false" aria-label="${tool.label}" title="${tool.label}${tool.key ? ` (${tool.key})` : ''}">${icon(tool.icon)}</button>`).join('')}
       </div>`).join('')}
@@ -116,6 +115,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
         <button data-transform="rotate" aria-label="Rotate the frame 90° clockwise" title="Rotate the frame 90° clockwise">${icon('rotate-clockwise')}</button>
       </div>
     </div>
+    <div class="anim-options" data-options></div>
     <div class="anim-stage-column">
       <div class="anim-stage" data-stage>
         <canvas class="anim-display" tabindex="0" role="application" aria-label="Drawing canvas. B pen, E eraser, L line, R rectangle, G fill, I eyedropper, M select. Right-click erases, Alt-click takes a colour, hold Space and drag to pan."></canvas>

@@ -189,12 +189,15 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-warnings ul { margin: 0; padding: 0 0 0 16px; color: var(--muted); line-height: 1.5; }
 .anim-warnings .anim-name { color: var(--text); }
 
-/* Drawing canvas (6.6): tools on the left, the stage, colour on the right. */
+/* Drawing canvas (6.6): a tool bar and the tool's options on top, then the
+   stage with colour on the right. The tools sit in a bar so the stage gets the
+   full width beside the colour panel. */
 .anim-checker { background: repeating-conic-gradient(var(--anim-checker-b) 0 25%, var(--anim-checker-a) 0 50%) 0 0 / 8px 8px; }
-.anim-canvas { display: grid; grid-template-columns: var(--anim-tools-width, 76px) minmax(0, 1fr) minmax(168px, 208px); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
-.anim-tools { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 4px 0; border-right: 1px dotted var(--line); overflow-y: auto; }
-.anim-tool-group { display: grid; grid-template-columns: repeat(2, 32px); gap: 2px; padding: 6px 0; }
-.anim-tool-group + .anim-tool-group { border-top: 1px dotted var(--line); }
+.anim-canvas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(168px, 208px); grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; }
+.anim-tools { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 0; padding: 4px 0; border-bottom: 1px dotted var(--line); }
+.anim-tool-group { display: flex; gap: 2px; padding: 0 8px; }
+.anim-tool-group:first-child { padding-left: 0; }
+.anim-tool-group:not(:last-child) { border-right: 1px dotted var(--line); }
 .anim-tools button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 7px; color: var(--muted); }
 .anim-tools button:hover:not(:disabled) { color: var(--text); }
 .anim-tools button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
@@ -275,9 +278,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 /* A narrow drawing area keeps the stage wide and lays the colour controls
    out in columns below it. */
 @container (max-width: 480px) {
-  .anim-canvas { grid-template-columns: var(--anim-tools-width, 76px) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
-  .anim-tools { grid-row: 2 / -1; }
-  .anim-colour-panel { grid-column: 2; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-items: start; gap: 8px 16px; max-height: 184px; border-left: 0; border-top: 1px dotted var(--line); }
+  .anim-canvas { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  .anim-colour-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-items: start; gap: 8px 16px; max-height: 184px; border-left: 0; border-top: 1px dotted var(--line); }
   .anim-swatches-section { grid-column: 1 / -1; }
 }
 
@@ -341,7 +343,7 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
    hit areas in the graph and larger slider thumbs. Fine pointers keep the
    sizes above. */
 @media (pointer: coarse) {
-  #animation-view { --anim-tools-width: 136px; grid-template-rows: minmax(160px, 1fr) 20px minmax(112px, var(--anim-timeline-height, 168px)); }
+  #animation-view { grid-template-rows: minmax(160px, 1fr) 20px minmax(112px, var(--anim-timeline-height, 168px)); }
   .anim-list-header, .anim-graph-toolbar, .anim-document, .anim-timeline-bar { min-height: 44px; height: auto; }
   .anim-list-header h2, .anim-document-title h2, .anim-timeline-title { font-size: 15px; }
   .anim-document-title { line-height: 44px; }
@@ -350,9 +352,6 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-empty, .anim-details, .anim-stage-empty, .anim-timeline-empty, .anim-graph-empty { font-size: 14px; }
 
   /* Icon buttons. */
-  /* Three columns, so all tools fit beside the stage at iPad heights. */
-  .anim-tool-group { grid-template-columns: repeat(3, 40px); gap: 2px; padding: 4px 0; }
-  .anim-tools { padding: 0; }
   .anim-tools button { width: 40px; height: 40px; padding: 10px; }
   .anim-position:empty { display: none; }
   .anim-colour-head { flex-wrap: wrap; }
