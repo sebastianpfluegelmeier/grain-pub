@@ -13,6 +13,11 @@ import {icon} from './icons.js';
 export const CALL_DEFAULTS = Object.freeze({urgency: 1, rate: 1, loop: true, randomize: false});
 // The runtime seeds each machine from its call site, which the editor cannot
 // know, so the preview uses a fixed seed: a restart repeats the same shuffle.
+// Where the call puts the frame: its centre in 0..1 and a factor on its
+// native pixel size. The preview draws in the editor canvas, so these only
+// go into the copied call.
+export const PLACEMENT_DEFAULTS = Object.freeze({u: 0.5, v: 0.5, scale: 1});
+const MAX_SCALE = 64;
 export const PREVIEW_SEED = 0;
 
 const text = value => String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -99,6 +104,12 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
         <input type="number" data-preview-rate min="0" max="${MAX_RATE}" step="0.25" value="${CALL_DEFAULTS.rate}"></label>
       <label class="anim-detail-toggle" title="Play the requested state's loops while resting there"><input type="checkbox" data-preview-loop ${CALL_DEFAULTS.loop ? 'checked' : ''}>Loop</label>
       <label class="anim-detail-toggle" title="Shuffle between alternatives instead of taking them in turn"><input type="checkbox" data-preview-randomize ${CALL_DEFAULTS.randomize ? 'checked' : ''}>Randomize</label>
+      <label class="anim-preview-range" title="Horizontal centre of the frame in the copied call: 0 is the left edge, 1 the right">X
+        <input type="range" data-preview-place="u" min="0" max="1" step="0.05" value="${PLACEMENT_DEFAULTS.u}"><output data-preview-place-value="u">${PLACEMENT_DEFAULTS.u.toFixed(2)}</output></label>
+      <label class="anim-preview-range" title="Vertical centre of the frame in the copied call: 0 is the top edge, 1 the bottom">Y
+        <input type="range" data-preview-place="v" min="0" max="1" step="0.05" value="${PLACEMENT_DEFAULTS.v}"><output data-preview-place-value="v">${PLACEMENT_DEFAULTS.v.toFixed(2)}</output></label>
+      <label class="anim-preview-rate" title="Size in the copied call: multiplies the animation's own pixel size">Scale
+        <input type="number" data-preview-scale min="0.25" max="${MAX_SCALE}" step="0.25" value="${PLACEMENT_DEFAULTS.scale}"></label>
     </div>`;
   const $ = selector => panel.querySelector(selector);
 
@@ -107,6 +118,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   // may name a state that an undo removed; the machine then ignores it, like
   // the runtime ignores an unknown state.
   let requested = null;
+  const placement = {...PLACEMENT_DEFAULTS};
   let player = createPlayer({seed});
   let shown = {frame: undefined, highlight: '', where: '', heading: ''};
 
@@ -284,6 +296,12 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     if (force || full !== shown.where) { shown.where = full;$('[data-preview-where]').innerHTML = full; }
     if (force || heading !== shown.heading) { shown.heading = heading;$('[data-preview-heading]').innerHTML = heading; }
   }
+  function place(key, raw) {
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return;
+    placement[key] = key === 'scale' ? clamp(value, 0.25, MAX_SCALE) : clamp(value, 0, 1);
+    renderControls();
+  }
   function renderControls() {
     const inputs = player.inputs, focused = document.activeElement;
     const pause = $('[data-preview-pause]');
@@ -295,6 +313,13 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     $('[data-preview-urgency-value]').textContent = inputs.urgency.toFixed(2);
     const rate = $('[data-preview-rate]');
     if (rate !== focused) rate.value = literal(inputs.rate);
+    for (const key of ['u', 'v']) {
+      const slider = $(`[data-preview-place="${key}"]`);
+      if (slider !== focused) slider.value = String(placement[key]);
+      $(`[data-preview-place-value="${key}"]`).textContent = placement[key].toFixed(2);
+    }
+    const scale = $('[data-preview-scale]');
+    if (scale !== focused) scale.value = literal(placement.scale);
     $('[data-preview-loop]').checked = inputs.loop;
     $('[data-preview-randomize]').checked = inputs.randomize;
     $('[data-preview-copy]').disabled = !callText();
@@ -315,6 +340,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     if (inputs.rate !== CALL_DEFAULTS.rate) args.push(`rate: ${literal(inputs.rate)}`);
     if (inputs.loop !== CALL_DEFAULTS.loop) args.push(`loop: ${inputs.loop}`);
     if (inputs.randomize !== CALL_DEFAULTS.randomize) args.push(`randomize: ${inputs.randomize}`);
+    for (const key of ['u', 'v', 'scale']) if (placement[key] !== PLACEMENT_DEFAULTS[key]) args.push(`${key}: ${literal(placement[key])}`);
     return `animation_graph(${args.join(', ')})`;
   }
   async function copyCall() {
@@ -339,6 +365,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   });
   panel.addEventListener('input', event => {
     if (event.target.matches('[data-preview-urgency]')) setInputs({urgency: Number(event.target.value)});
+    else if (event.target.matches('[data-preview-place]')) place(event.target.dataset.previewPlace, event.target.value);
   });
   panel.addEventListener('change', event => {
     const input = event.target;
@@ -348,6 +375,10 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
       if (input.value === '' || !Number.isFinite(Number(input.value))) { input.value = literal(player.inputs.rate);return; }
       setInputs({rate: Number(input.value)});
       input.value = literal(player.inputs.rate);
+    } else if (input.matches('[data-preview-place]')) place(input.dataset.previewPlace, input.value);
+    else if (input.matches('[data-preview-scale]')) {
+      if (input.value !== '') place('scale', input.value);
+      input.value = literal(placement.scale);
     } else if (input.matches('[data-preview-loop]')) setInputs({loop: input.checked});
     else if (input.matches('[data-preview-randomize]')) setInputs({randomize: input.checked});
   });
