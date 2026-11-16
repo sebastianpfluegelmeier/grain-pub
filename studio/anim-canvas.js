@@ -97,12 +97,52 @@ const MODE_TITLES = {
   'radial-out': 'The first colour at the brush centre, the second at its edge',
   'radial-in': 'The second colour at the brush centre, the first at its edge',
 };
+// Guides: a coarse grid, centre lines and snapping for the shape tools. They
+// are settings of the editor, kept in local storage and never written into
+// an animation.
+const GUIDES_KEY = 'studio-anim-guides', GRID_STEP_MIN = 2, GRID_STEP_MAX = 512;
+export function normalizeGuides(source) {
+  const input = source && typeof source === 'object' ? source : {};
+  const step = value => clamp(Math.round(Number(value)) || 8, GRID_STEP_MIN, GRID_STEP_MAX);
+  return {grid: input.grid === true, gridW: step(input.gridW), gridH: step(input.gridH), centre: input.centre === true, snap: input.snap === true};
+}
+// Snapping works per axis on pixel edges: edge 0 is the left side of pixel 0,
+// edge `size` the right side of the last pixel. The targets are the grid
+// lines, the frame's sides and, with centre lines on, the middle.
+export function snapEdges(size, step, centre) {
+  const edges = new Set([0, size]);
+  for (let edge = step; edge < size; edge += step) edges.add(edge);
+  if (centre) { edges.add(Math.floor(size / 2));edges.add(Math.ceil(size / 2)); }
+  return [...edges].sort((a, b) => a - b);
+}
+const nearest = (values, position) => values.reduce((best, value) => Math.abs(value - position) < Math.abs(best - position) ? value : best);
+// The end of a line snaps to the pixel right of (below) the nearest target,
+// or to the last pixel at the far side. On an odd size the centre target is
+// the middle pixel. Returns that pixel and where the marker goes.
+export function snapPixel(position, size, step, centre) {
+  let best = {pixel: size - 1, mark: size};
+  const consider = (pixel, mark) => { if (Math.abs(mark - position) < Math.abs(best.mark - position)) best = {pixel, mark}; };
+  for (let edge = 0; edge < size; edge += step) consider(edge, edge);
+  if (centre) consider(Math.floor(size / 2), size / 2);
+  return best;
+}
+// One axis of a snapped rectangle that starts on the edge `corner`: it ends
+// on the nearest edge on the pointer's side, so it covers whole pixels up to
+// a target and is never empty. Returns the first and the last pixel.
+export function snapSpan(corner, position, edges) {
+  const side = forward => edges.filter(edge => forward ? edge > corner : edge < corner);
+  let candidates = side(position >= corner);
+  if (!candidates.length) candidates = side(position < corner);
+  const mark = nearest(candidates, position);
+  return mark > corner ? {from: corner, to: mark - 1, mark} : {from: mark, to: corner - 1, mark};
+}
+
 const toolById = id => TOOLS.find(tool => tool.id === id) ?? TOOLS[0];
 
 // `onInteract()` runs before the canvas changes a frame (the timeline stops
 // playback); `onTogglePlay()` when Space is tapped without panning; `ghosts()`
 // returns the onion ghosts to show as [{id, side, distance}].
-export function createAnimationCanvas({parent, session, onInteract = () => {}, onTogglePlay = () => {}, ghosts = () => []}) {
+export function createAnimationCanvas({parent, session, onInteract = () => {}, onTogglePlay = () => {}, ghosts = () => [], storage = null}) {
   parent.classList.add('anim-canvas');
   parent.innerHTML = `
     <div class="anim-tools" role="toolbar" aria-label="Tools" aria-orientation="horizontal">
@@ -113,6 +153,12 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
         <button data-transform="flip-x" aria-label="Flip the frame horizontally" title="Flip the frame horizontally">${icon('flip-horizontal')}</button>
         <button data-transform="flip-y" aria-label="Flip the frame vertically" title="Flip the frame vertically">${icon('flip-vertical')}</button>
         <button data-transform="rotate" aria-label="Rotate the frame 90° clockwise" title="Rotate the frame 90° clockwise">${icon('rotate-clockwise')}</button>
+      </div>
+      <div class="anim-tool-group anim-guides" role="group" aria-label="Guides">
+        <button data-guide="grid" aria-pressed="false" aria-label="Grid" title="Show the grid">${icon('grid')}</button>
+        <span class="anim-grid-step"><input type="number" data-grid-step="gridW" min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid width in pixels" title="Grid width in pixels"><span aria-hidden="true">×</span><input type="number" data-grid-step="gridH" min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid height in pixels" title="Grid height in pixels"></span>
+        <button data-guide="centre" aria-pressed="false" aria-label="Centre lines" title="Show the centre lines">${icon('centre-lines')}</button>
+        <button data-guide="snap" aria-pressed="false" aria-label="Snap line, rectangle and gradient" title="Snap line, rectangle and gradient to the grid, the sides and the centre lines">${icon('magnet')}</button>
       </div>
     </div>
     <div class="anim-options" data-options></div>
@@ -158,6 +204,10 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // True while the size slider is dragged: the footprint is then shown in the
   // middle of the stage, because a finger has no hover position to show it at.
   let sizing = false;
+  let guides = normalizeGuides(null);
+  try { guides = normalizeGuides(JSON.parse(storage?.getItem(GUIDES_KEY) ?? 'null')); } catch {}
+  // Where the snap marker is shown, in pixel-edge coordinates, or null.
+  let snapMark = null;
   const touch = {mode: 'idle', pointers: new Map(), primaryId: null, start: null, centroid: null, spread: null, blockDrawing: false};
 
   const picker = createColourPicker({parent: $('[data-colour]'), session, onChange: () => requestDraw(), onMessage: message});
@@ -413,14 +463,34 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     }
     ctx.strokeStyle = token('--line', '#343a3b');ctx.lineWidth = 1;
     ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+    if (!preview) {
+      const snap = value => Math.round(value * dpr) / dpr, thick = Math.max(1, Math.round(dpr)) / dpr;
+      const vertical = at => ctx.fillRect(snap(x + at * k - thick / 2), y, thick, h), horizontal = at => ctx.fillRect(x, snap(y + at * k - thick / 2), w, thick);
+      if (guides.grid) {
+        ctx.fillStyle = token('--anim-guide', 'rgba(128, 128, 128, 0.6)');
+        for (let column = guides.gridW; column < d.width; column += guides.gridW) vertical(column);
+        for (let row = guides.gridH; row < d.height; row += guides.gridH) horizontal(row);
+      }
+      if (guides.centre) { ctx.fillStyle = token('--anim-centre', 'rgb(214, 51, 132)');vertical(d.width / 2);horizontal(d.height / 2); }
+    }
     const shown = gesture?.type === 'move' ? gesture.shown : gesture?.type === 'marquee' ? gesture.rect : selection;
     if (shown) outline(ctx, [[shown.x, shown.y, shown.x + shown.w, shown.y + shown.h]], true);
-    if (hover && !sizing && !gesture?.type?.match?.(/pan|marquee|move/) && editable()) {
+    const marked = snapMark && snapActive();
+    if (hover && !sizing && !gesture?.type?.match?.(/pan|marquee|move/) && editable() && !(marked && tool().id === 'rectangle')) {
       const t = tool();
       const cells = t.kind === 'stroke' || (t.kind === 'drag' && t.id === 'line') ? footprint(brushSize(), brush.shape) : footprint(1);
       outline(ctx, footprintEdges(cells, hover.x, hover.y), false);
     }
     if (sizing && editable()) outline(ctx, footprintEdges(footprint(brushSize(), brush.shape), Math.floor((width / 2 - x) / k), Math.floor((height / 2 - y) / k)), false);
+    if (marked && !sizing) {
+      // A cross in a circle on the target the shape snaps to.
+      const mx = x + snapMark.x * k, my = y + snapMark.y * k;
+      ctx.beginPath();
+      ctx.arc(mx, my, 5, 0, Math.PI * 2);
+      ctx.moveTo(mx - 9, my);ctx.lineTo(mx + 9, my);ctx.moveTo(mx, my - 9);ctx.lineTo(mx, my + 9);
+      ctx.lineWidth = 3.5;ctx.strokeStyle = '#121210';ctx.stroke();
+      ctx.lineWidth = 1.5;ctx.strokeStyle = '#f4f2e8';ctx.stroke();
+    }
   }
   // Draws rectangles or edge segments (in frame pixels) as a dark and a light
   // line, visible on any colour.
@@ -472,6 +542,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     for (const button of parent.querySelectorAll('[data-transform]')) button.disabled = !canEdit || (button.dataset.transform === 'rotate' && !canRotate(d));
     const rotateButton = $('[data-transform="rotate"]');
     rotateButton.title = d && !canRotate(d) ? 'Rotate needs a square canvas' : 'Rotate the frame 90° clockwise';
+    for (const button of parent.querySelectorAll('[data-guide]')) button.setAttribute('aria-pressed', String(guides[button.dataset.guide]));
+    for (const input of parent.querySelectorAll('[data-grid-step]')) if (document.activeElement !== input) input.value = String(guides[input.dataset.gridStep]);
     for (const button of parent.querySelectorAll('.anim-zoom button')) button.disabled = !d;
     $('[data-undo]').disabled = !session.canUndo;
     $('[data-redo]').disabled = !session.canRedo;
@@ -599,7 +671,33 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     // Studio's View zoom scales the page, so client pixels are converted back to canvas pixels.
     const scale = rect.width > 0 && display.clientWidth > 0 ? display.clientWidth / rect.width : 1;
     const sx = (event.clientX - rect.left) * scale, sy = (event.clientY - rect.top) * scale;
-    return {sx, sy, x: Math.floor((sx - view.x) / view.k), y: Math.floor((sy - view.y) / view.k)};
+    const fx = (sx - view.x) / view.k, fy = (sy - view.y) / view.k;
+    return {sx, sy, fx, fy, x: Math.floor(fx), y: Math.floor(fy)};
+  }
+  function setGuides(patch) {
+    guides = normalizeGuides({...guides, ...patch});
+    try { storage?.setItem(GUIDES_KEY, JSON.stringify(guides)); } catch {}
+    if (!guides.snap) snapMark = null;
+    renderChrome();requestDraw();
+  }
+  const snapActive = () => guides.snap && tool().kind === 'drag' && editable();
+  // The two ends of a shape for the pointer at `p`, and the snap marker.
+  // `start` is the result from the press: a line and a gradient keep their
+  // first pixel, a snapped rectangle keeps its first corner, an edge.
+  function shapeEnds(p, start) {
+    const d = doc();
+    if (!snapActive()) { const point = {x: p.x, y: p.y};return {from: start?.from ?? point, to: point, mark: null}; }
+    if (tool().id === 'rectangle') {
+      const edgesX = snapEdges(d.width, guides.gridW, guides.centre), edgesY = snapEdges(d.height, guides.gridH, guides.centre);
+      const corner = start?.corner ?? {x: nearest(edgesX, p.fx), y: nearest(edgesY, p.fy)};
+      // Before the press the marker shows where the first corner would go.
+      if (!start && !gesture && !p.pressed) return {corner, from: null, to: null, mark: corner};
+      const sx = snapSpan(corner.x, p.fx, edgesX), sy = snapSpan(corner.y, p.fy, edgesY);
+      return {corner, from: {x: sx.from, y: sy.from}, to: {x: sx.to, y: sy.to}, mark: {x: sx.mark, y: sy.mark}};
+    }
+    const sx = snapPixel(p.fx, d.width, guides.gridW, guides.centre), sy = snapPixel(p.fy, d.height, guides.gridH, guides.centre);
+    const point = {x: sx.pixel, y: sy.pixel};
+    return {from: start?.from ?? point, to: point, mark: {x: sx.mark, y: sy.mark}};
   }
   const brushSize = () => brush.size;
   // Pen pressure changes size or opacity when the brush asks for it; a mouse
@@ -658,9 +756,10 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       }
       gesture = {...base, type: 'stroke', entries, base: entries[0].base, last: point, path: [point]};
     } else if (t.kind === 'drag') {
-      const entries = strokes(), from = {x: p.x, y: p.y};
-      for (const entry of entries) t.draw(entry.stroke, from, from);
-      gesture = {...base, type: 'drag', entries, base: entries[0].base, from, to: from};
+      const entries = strokes(), ends = shapeEnds({...p, pressed: true});
+      for (const entry of entries) t.draw(entry.stroke, ends.from, ends.to);
+      gesture = {...base, type: 'drag', entries, base: entries[0].base, ends, from: ends.from, to: ends.to};
+      snapMark = ends.mark;
     } else if (t.kind === 'fill') {
       if (inside(s, p.x, p.y)) {
         editFrames(targets().map(target => target.id), (target, weight) => floodFill(target, p.x, p.y, {colour: options.colour, erase, opacity: brush.opacity * weight}) || undefined);
@@ -700,7 +799,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
         }
         g.last = point;
       } else if (g.type === 'drag') {
-        g.to = {x: p.x, y: p.y};
+        g.ends = shapeEnds({...p, pressed: true}, g.ends);g.from = g.ends.from;g.to = g.ends.to;snapMark = g.ends.mark;
       } else if (g.type === 'pick') {
         pickAt(p);
       } else if (g.type === 'marquee') {
@@ -885,8 +984,9 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     if (event.pointerType === 'pen' && (event.pointerId === gesture?.pointerId || event.buttons > 0 || event.pressure > 0)) penUntil = Date.now() + PEN_PALM_REJECTION_MS;
     if (event.pointerType === 'touch' && touch.mode !== 'idle') { touchMove(event);return; }
     if (gesture) { move(event);return; }
-    const p = locate(event);
-    hover = {x: p.x, y: p.y};
+    const p = locate(event), ends = snapActive() ? shapeEnds(p) : null;
+    hover = ends?.to ?? {x: p.x, y: p.y};
+    snapMark = ends?.mark ?? null;
     showPosition(p);
     requestDraw();
   });
@@ -903,7 +1003,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   display.addEventListener('lostpointercapture', event => {
     if (gesture?.pointerId === event.pointerId && gesture.pointerType !== 'touch') finish(event);
   });
-  display.addEventListener('pointerleave', () => { if (!gesture) { hover = null;positionLine.textContent = '';requestDraw(); } });
+  display.addEventListener('pointerleave', () => { if (!gesture) { hover = null;snapMark = null;positionLine.textContent = '';requestDraw(); } });
   // Right-click erases, so the context menu never opens on the canvas.
   display.addEventListener('contextmenu', event => event.preventDefault());
   // Ctrl or Cmd with the wheel (and trackpad pinch, which arrives as a
@@ -950,6 +1050,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     if (!button || button.disabled) return;
     if (button.dataset.tool) setTool(button.dataset.tool);
     else if (button.dataset.transform) transform(button.dataset.transform);
+    else if (button.dataset.guide) setGuides({[button.dataset.guide]: !guides[button.dataset.guide]});
     else if (button.dataset.shape) { brush.shape = button.dataset.shape;renderOptions();requestDraw(); }
     else if (button.matches('[data-copy]')) copySelection();
     else if (button.matches('[data-cut]')) cutSelection();
@@ -963,6 +1064,10 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     else if (button.matches('[data-zoom-in]')) zoomStep(1);
     else if (button.matches('[data-zoom-out]')) zoomStep(-1);
     else if (button.matches('[data-canvas-fit]')) fit();
+  });
+  parent.querySelector('.anim-guides').addEventListener('change', event => {
+    const input = event.target;
+    if (input.matches('[data-grid-step]')) { setGuides({[input.dataset.gridStep]: input.value});input.value = String(guides[input.dataset.gridStep]); }
   });
   $('[data-options]').addEventListener('input', event => {
     const input = event.target;
@@ -1140,6 +1245,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     // {x, y, k}: frame pixel (px, py) is drawn at (px * k + x, py * k + y) inside the canvas.
     get view() { syncView();return {...view}; },
     get tool() { return toolId; },
+    get guides() { return {...guides}; },
+    setGuides,
     setTool,
     get brush() { return {...brush, modes: {...brush.modes}}; },
     setBrush,

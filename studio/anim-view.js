@@ -188,7 +188,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   // A tap on Space pauses the graph preview while it runs, otherwise it plays
   // the selected edge.
   const canvas = createAnimationCanvas({parent: regions.canvas, session, onInteract: () => timeline.stop(),
-    onTogglePlay: () => preview.active ? preview.togglePause() : timeline.togglePlay(), ghosts: () => timeline.ghosts()});
+    onTogglePlay: () => preview.active ? preview.togglePause() : timeline.togglePlay(), ghosts: () => timeline.ghosts(), storage});
   const preview = createAnimationPreview({session, graph, canvas, timeline, clock, reference: assetReference});
   // The preview comes right after the graph, so its Escape is seen before the
   // canvas would use Escape to drop its pixel selection.
