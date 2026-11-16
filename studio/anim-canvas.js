@@ -5,7 +5,7 @@
 // step per stroke, so a stroke is painted into the frame as the pointer moves
 // and recorded at pointer up with the copy taken at pointer down.
 
-import {surface, createStroke, resetStroke, stamp, stampDither, stampSpray, stampNoise, stampBlur, stampDisplace, strokeLine, strokeRect,
+import {surface, createStroke, resetStroke, stamp, stampBrush, BRUSH_TYPES, brushType, stampBlur, stampDisplace, strokeLine, strokeRect,
   drawGradient, floodFill, pick, rectFrom, clipRect, copyRect, clearRect, paste, moveRect, shift, flip, rotate, canRotate, toRGBA, addGhost,
   footprint, inside, paintTargets, MIN_BRUSH, MAX_BRUSH, VALUE_MODES, TWEEN_MODES, toHex, decodeValue} from './anim-paint.js';
 import {createColourPicker} from './anim-colour.js';
@@ -60,13 +60,12 @@ export const TOOL_GROUPS = [
   {id: 'frame', label: 'Selection and frames'},
 ];
 const BRUSH_OPTIONS = ['size', 'shape', 'opacity', 'pressure'];
+// The pen and the eraser choose a brush type instead of a shape; the type's
+// own options (density) are added when it has them.
+const TYPED_OPTIONS = ['type', 'size', 'opacity', 'pressure'];
 export const TOOLS = [
-  {id: 'pen', group: 'brushes', label: 'Pen', key: 'B', icon: 'pen', kind: 'stroke', paint: true, options: [...BRUSH_OPTIONS, 'values']},
-  {id: 'eraser', group: 'brushes', label: 'Eraser', key: 'E', icon: 'eraser', kind: 'stroke', paint: true, erase: true, options: BRUSH_OPTIONS},
-  {id: 'dither', group: 'brushes', label: 'Dither pen', icon: 'dither', kind: 'stroke', paint: true, stamp: stampDither, options: [...BRUSH_OPTIONS, 'density', 'values']},
-  {id: 'spray', group: 'brushes', label: 'Spray', icon: 'spray', kind: 'stroke', paint: true, stamp: stampSpray, options: [...BRUSH_OPTIONS, 'values']},
-  {id: 'noise', group: 'brushes', label: 'Noise', icon: 'noise', kind: 'stroke', paint: true, stamp: stampNoise, options: BRUSH_OPTIONS,
-    hint: 'Each pixel gets a random colour between the first and the second colour.'},
+  {id: 'pen', group: 'brushes', label: 'Pen', key: 'B', icon: 'pen', kind: 'stroke', paint: true, stamp: stampBrush, options: [...TYPED_OPTIONS, 'values']},
+  {id: 'eraser', group: 'brushes', label: 'Eraser', key: 'E', icon: 'eraser', kind: 'stroke', paint: true, erase: true, stamp: stampBrush, options: TYPED_OPTIONS},
   {id: 'line', group: 'shapes', label: 'Line', key: 'L', icon: 'line', kind: 'drag', paint: true, options: ['size', 'shape', 'opacity', 'values'],
     draw: (stroke, from, to) => { stroke.gradient = {from, to};strokeLine(stroke, from, to); }},
   {id: 'rectangle', group: 'shapes', label: 'Filled rectangle', key: 'R', icon: 'rectangle', kind: 'drag', paint: true, options: ['opacity'],
@@ -188,7 +187,12 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   const statusLine = $('.anim-canvas-status'), positionLine = $('[data-position]');
 
   let toolId = 'pen', previousTool = 'pen';
-  const brush = {size: 1, shape: 'square', opacity: 1, pressure: 'off', density: 50, modes: {colour: 'fixed', alpha: 'fixed'}, seed: null};
+  const brush = {size: 1, shape: 'square', opacity: 1, pressure: 'off', density: 50, modes: {colour: 'fixed', alpha: 'fixed'}, seed: null,
+    // The brush type of the pen and of the eraser, each kept on its own.
+    types: {pen: 'square', eraser: 'square'}};
+  // The brush type of a tool that has one, else null, and the tip shape a tool paints with.
+  const typeOf = t => t.options.includes('type') ? brushType(brush.types[t.id]) : null;
+  const shapeOf = t => typeOf(t)?.shape ?? brush.shape;
   // Which frames of the edge a stroke, fill, shift or flip reaches (6.6).
   const scope = {kind: 'frame', radius: 1, fade: true};
   let tweenMode = 'dissolve';
@@ -478,10 +482,10 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     const marked = snapMark && snapActive();
     if (hover && !sizing && !gesture?.type?.match?.(/pan|marquee|move/) && editable() && !(marked && tool().id === 'rectangle')) {
       const t = tool();
-      const cells = t.kind === 'stroke' || (t.kind === 'drag' && t.id === 'line') ? footprint(brushSize(), brush.shape) : footprint(1);
+      const cells = t.kind === 'stroke' || (t.kind === 'drag' && t.id === 'line') ? footprint(brushSize(), shapeOf(t)) : footprint(1);
       outline(ctx, footprintEdges(cells, hover.x, hover.y), false);
     }
-    if (sizing && editable()) outline(ctx, footprintEdges(footprint(brushSize(), brush.shape), Math.floor((width / 2 - x) / k), Math.floor((height / 2 - y) / k)), false);
+    if (sizing && editable()) outline(ctx, footprintEdges(footprint(brushSize(), shapeOf(tool())), Math.floor((width / 2 - x) / k), Math.floor((height / 2 - y) / k)), false);
     if (marked && !sizing) {
       // A cross in a circle on the target the shape snaps to.
       const mx = x + snapMark.x * k, my = y + snapMark.y * k;
@@ -559,17 +563,19 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // changes, so a dragged slider keeps its pointer.
   const optionLabel = (d, channel) => channel === 'alpha' ? 'Alpha' : d?.format === 'field' ? 'Value' : d?.format === 'matte' ? 'Grey' : 'Colour';
   function renderOptions() {
-    const t = tool(), d = doc(), options = preview || !d ? [] : t.options;
+    const t = tool(), d = doc(), type = typeOf(t);
+    const options = preview || !d ? [] : type?.density ? [...t.options, 'density'] : t.options;
     const key = [t.id, options.join(), Boolean(selection), Boolean(clipboard), editable(), d?.format, scope.kind, Boolean(preview), session.frame?.count].join(':');
     const host = $('[data-options]');
     if (key !== renderedOptions) {
       renderedOptions = key;
       const disabled = editable() ? '' : 'disabled';
       const parts = [];
+      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints">Type<select data-brush-type ${disabled}>${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</select></label>`);
       if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])">Size<input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1" ${disabled}><output data-size-value></output></label>`);
       if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button class="anim-icon-button" data-shape="square" aria-label="Square brush" title="Square brush">${icon('shape-square')}</button><button class="anim-icon-button" data-shape="round" aria-label="Round brush" title="Round brush">${icon('shape-round')}</button></span>`);
       if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1" ${disabled}><output data-opacity-value></output></label>`);
-      if (options.includes('density')) parts.push(`<label class="anim-option" title="How many pixels of the 4 × 4 dither pattern are drawn">Density<input type="range" data-density min="1" max="100" step="1" ${disabled}><output data-density-value></output></label>`);
+      if (options.includes('density')) parts.push(`<label class="anim-option" title="How dense the pattern of the brush type is">Density<input type="range" data-density min="1" max="100" step="1" ${disabled}><output data-density-value></output></label>`);
       if (options.includes('pressure')) parts.push(`<label class="anim-option" title="What pen pressure changes">Pressure<select data-pressure ${disabled}><option value="off">none</option><option value="size">size</option><option value="opacity">opacity</option></select></label>`);
       if (options.includes('values')) {
         const select = (channel) => `<label class="anim-option" title="Where each pixel lies between the first and the second colour">${optionLabel(d, channel)}<select data-mode="${channel}" ${disabled}>${VALUE_MODES.map(mode => `<option value="${mode}" title="${MODE_TITLES[mode]}">${MODE_LABELS[mode]}</option>`).join('')}</select></label>`;
@@ -612,6 +618,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     if (size) size.setAttribute('aria-valuetext', `${brush.size} ${brush.size === 1 ? 'pixel' : 'pixels'}`);
     const sizeValue = host.querySelector('[data-size-value]');
     if (sizeValue) sizeValue.textContent = String(brush.size);
+    const typeSelect = host.querySelector('[data-brush-type]');
+    if (typeSelect && type) typeSelect.value = type.id;
     for (const button of host.querySelectorAll('[data-shape]')) button.setAttribute('aria-pressed', String(button.dataset.shape === brush.shape));
     const opacity = host.querySelector('[data-opacity]');
     if (opacity && opacity !== active) opacity.value = String(Math.round(brush.opacity * 100));
@@ -646,12 +654,19 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   function setBrush(next) {
     if (next.size !== undefined) brush.size = clamp(Math.round(next.size), MIN_BRUSH, MAX_BRUSH);
     if (next.shape !== undefined && ['square', 'round'].includes(next.shape)) brush.shape = next.shape;
+    // `type` sets the brush type of the selected tool, when it is the pen or the eraser.
+    if (next.type !== undefined) setBrushType(next.type);
     if (next.opacity !== undefined) brush.opacity = clamp(next.opacity, 0.01, 1);
     if (next.pressure !== undefined && ['off', 'size', 'opacity'].includes(next.pressure)) brush.pressure = next.pressure;
     if (next.density !== undefined) brush.density = clamp(Math.round(next.density) || 1, 1, 100);
     if (next.seed !== undefined) brush.seed = next.seed === null ? null : next.seed >>> 0;
     for (const channel of ['colour', 'alpha']) if (next.modes?.[channel] && VALUE_MODES.includes(next.modes[channel])) brush.modes[channel] = next.modes[channel];
     renderOptions();requestDraw();
+  }
+  function setBrushType(id) {
+    const t = tool(), type = BRUSH_TYPES.find(item => item.id === id);
+    if (!type || !t.options.includes('type') || (type.pen && t.erase)) return;
+    brush.types[t.id] = type.id;
   }
   function setScope(next) {
     if (['frame', 'nearby', 'edge'].includes(next.kind)) scope.kind = next.kind;
@@ -741,7 +756,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     const seed = brush.seed ?? Math.floor(Math.random() * 0x100000000);
     const modes = doc().format === 'field' ? {colour: brush.modes.colour} : brush.modes;
     const options = {colour: picker.colour, colour2: picker.colour2, modes, erase, size: brush.size, shape: brush.shape, opacity: brush.opacity,
-      density: brush.density};
+      density: brush.density, type: typeOf(t)?.id ?? null};
     // One stroke per frame of the scope, each with its own copy of the frame
     // from before the stroke and its weight; they are recorded together.
     const strokes = () => targets().map((target, index) => {
@@ -1095,6 +1110,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   $('[data-options]').addEventListener('change', event => {
     const input = event.target;
     if (input.matches('[data-size]')) { sizing = false;requestDraw(); }
+    else if (input.matches('[data-brush-type]')) { setBrushType(input.value);renderOptions();requestDraw(); }
     else if (input.matches('[data-pressure]')) brush.pressure = ['off', 'size', 'opacity'].includes(input.value) ? input.value : 'off';
     else if (input.matches('[data-mode]')) setBrush({modes: {[input.dataset.mode]: input.value}});
     else if (input.matches('[data-tween-mode]')) { tweenMode = TWEEN_MODES.includes(input.value) ? input.value : 'dissolve'; }
@@ -1254,7 +1270,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     get guides() { return {...guides}; },
     setGuides,
     setTool,
-    get brush() { return {...brush, modes: {...brush.modes}}; },
+    get brush() { return {...brush, modes: {...brush.modes}, types: {...brush.types}}; },
     setBrush,
     // Which frames of the edge strokes, fills, shifts and flips change:
     // {kind: 'frame' | 'nearby' | 'edge', radius, fade}.

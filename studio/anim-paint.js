@@ -10,7 +10,28 @@
 export const CHANNELS = {field: 1, matte: 2, image: 4};
 export const MIN_BRUSH = 1;
 export const MAX_BRUSH = 64;
-export const SHAPES = ['square', 'round'];
+// Tip shapes. Square and round are filled; ring is the outline of round; the
+// rest are one-pixel lines as long as the brush size, for strokes whose width
+// depends on the direction of travel.
+export const SHAPES = ['square', 'round', 'ring', 'slash', 'backslash', 'horizontal', 'vertical'];
+// The brush types of the pen and the eraser: a tip shape and how a stamp of
+// it is filled. `pen` marks the types that need a colour, which an eraser has
+// no use for.
+export const BRUSH_TYPES = [
+  {id: 'square', label: 'Square', shape: 'square'},
+  {id: 'round', label: 'Round', shape: 'round'},
+  {id: 'slash', label: 'Diagonal /', shape: 'slash'},
+  {id: 'backslash', label: 'Diagonal \\', shape: 'backslash'},
+  {id: 'horizontal', label: 'Horizontal line', shape: 'horizontal'},
+  {id: 'vertical', label: 'Vertical line', shape: 'vertical'},
+  {id: 'dither', label: 'Dither', shape: 'square', density: true},
+  {id: 'spray', label: 'Spray', shape: 'round'},
+  {id: 'jiggle', label: 'Jiggle', shape: 'round'},
+  {id: 'hatch', label: 'Hatch', shape: 'square', density: true},
+  {id: 'ring', label: 'Ring', shape: 'ring'},
+  {id: 'noise', label: 'Noise', shape: 'square', pen: true},
+];
+export const brushType = id => BRUSH_TYPES.find(type => type.id === id) ?? BRUSH_TYPES[0];
 
 const clampByte = value => value < 0 ? 0 : value > 255 ? 255 : Math.round(value);
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -158,9 +179,15 @@ function brushOf(size, shape) {
   for (let by = 0; by < size; by++) {
     for (let bx = 0; bx < size; bx++) {
       const dx = bx - centre, dy = by - centre;
-      if (shape === 'round' && dx * dx + dy * dy > radius * radius) continue;
+      if ((shape === 'round' || shape === 'ring') && dx * dx + dy * dy > radius * radius) continue;
+      // The ring keeps the cells of the disc that have a neighbour outside it.
+      if (shape === 'ring' && size > 2 && [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([ox, oy]) => (dx + ox) ** 2 + (dy + oy) ** 2 <= radius * radius)) continue;
+      if (shape === 'slash' && bx + by !== size - 1) continue;
+      if (shape === 'backslash' && bx !== by) continue;
+      if (shape === 'horizontal' && by !== Math.floor(size / 2)) continue;
+      if (shape === 'vertical' && bx !== Math.floor(size / 2)) continue;
       cells.push(start + bx, start + by);
-      distances.push(shape === 'round' ? Math.min(1, Math.sqrt(dx * dx + dy * dy) / radius) : Math.min(1, Math.max(Math.abs(dx), Math.abs(dy)) / squareRadius));
+      distances.push(shape !== 'square' ? Math.min(1, Math.sqrt(dx * dx + dy * dy) / radius) : Math.min(1, Math.max(Math.abs(dx), Math.abs(dy)) / squareRadius));
     }
   }
   const result = {cells: Int16Array.from(cells), distances: Float32Array.from(distances)};
@@ -266,14 +293,16 @@ export function mixColours(a, b, t, ta = t) {
 // pen) and seed (for the random brushes). `base` may pass a copy taken
 // earlier, which the stroke then owns.
 export function createStroke(s, {colour = [0, 0, 0, 255], colour2 = [0, 0, 0, 255], modes = {}, erase = false, size = 1, shape = 'square',
-  opacity = 1, weight = 1, density = 50, seed = 1} = {}, base = null) {
+  opacity = 1, weight = 1, density = 50, seed = 1, type = null} = {}, base = null) {
   const stroke = {
     s, format: s.format, width: s.width, height: s.height,
     base: base ?? s.data.slice(),
     coverage: new Float32Array(s.width * s.height),
     colour: normalizeColour(s.format, colour), colour2: normalizeColour(s.format, colour2),
     modes: {colour: modes.colour ?? 'fixed', alpha: modes.alpha ?? 'fixed'},
-    erase, size, shape, opacity: clamp(opacity, 0, 1), weight: clamp(weight, 0, 1),
+    // `type` is a brush type id; it sets the tip shape and what stampBrush does.
+    erase, size, shape: type ? brushType(type).shape : shape, type, opacity: clamp(opacity, 0, 1), weight: clamp(weight, 0, 1),
+    density: clamp(density, 1, 100), wobble: 0,
     level: clamp(Math.round(density / 100 * 16), 0, 16),
     seed, random: createRandom(seed),
     // The line a stroke's 'along' mode runs over: {from, to}.
@@ -294,7 +323,7 @@ export function resetStroke(stroke) {
   stroke.coverage.fill(0);
   stroke.bounds = null;
   stroke.random = createRandom(stroke.seed);
-  stroke.lastStamp = null;stroke.motion = null;
+  stroke.lastStamp = null;stroke.motion = null;stroke.wobble = 0;
 }
 
 // The pixel offset when the stroke may paint (x, y) with `strength`, else -1.
@@ -353,7 +382,7 @@ export function noiseColour(stroke) {
 // stroke's own and let pen pressure vary them per stamp. `dither` leaves out
 // the pixels the ordered-dither matrix does not pass at the stroke's density.
 // `noise` gives each pixel a random colour between the two.
-function stampCells(stroke, x, y, size, strength, {dither = false, noise = false} = {}) {
+function stampCells(stroke, x, y, size, strength, {dither = false, noise = false, hatch = 0} = {}) {
   if (strength <= 0) return;
   const {cells, distances} = brushOf(size, stroke.shape), {width, height} = stroke;
   const varying = stroke.modes.colour !== 'fixed' || stroke.modes.alpha !== 'fixed';
@@ -361,6 +390,7 @@ function stampCells(stroke, x, y, size, strength, {dither = false, noise = false
     const px = x + cells[index], py = y + cells[index + 1];
     if (px < 0 || py < 0 || px >= width || py >= height) continue;
     if (dither && !ditherPasses(px, py, stroke.level)) continue;
+    if (hatch && (px + py) % hatch) continue;
     const colour = noise ? noiseColour(stroke) : varying ? modeColour(stroke, px, py, distances[index / 2]) : stroke.colour;
     coverPixel(stroke, px, py, strength, colour);
   }
@@ -374,6 +404,49 @@ export function stampDither(stroke, x, y, size = stroke.size, strength = stroke.
 }
 export function stampNoise(stroke, x, y, size = stroke.size, strength = stroke.opacity) {
   stampCells(stroke, x, y, size, strength, {noise: true});
+}
+
+// Diagonal stripes that stay in place on the canvas, so strokes that overlap
+// continue each other's lines. The density sets how close the stripes are:
+// every 2nd pixel at 100 % down to every 8th at the lowest.
+export function stampHatch(stroke, x, y, size = stroke.size, strength = stroke.opacity) {
+  stampCells(stroke, x, y, size, strength, {hatch: Math.round(8 - 6 * (stroke.density - 1) / 99)});
+}
+
+// A rough hand-made line. The width drifts as the stroke goes on, single
+// pixels are left out and a few land just outside. Which pixels are left out
+// depends on their place on the canvas, so later stamps of the same stroke do
+// not fill them in again.
+export function stampJiggle(stroke, x, y, size = stroke.size, strength = stroke.opacity) {
+  if (strength <= 0) return;
+  const random = stroke.random;
+  stroke.wobble = clamp(stroke.wobble + (random() - 0.5) * 0.25, -0.35, 0.35);
+  const wide = clamp(Math.round(size * (1 + stroke.wobble)), MIN_BRUSH, MAX_BRUSH);
+  const {cells, distances} = brushOf(wide, 'round'), {width, height} = stroke;
+  const varying = stroke.modes.colour !== 'fixed' || stroke.modes.alpha !== 'fixed';
+  for (let index = 0; index < cells.length; index += 2) {
+    const px = x + cells[index], py = y + cells[index + 1];
+    if (px < 0 || py < 0 || px >= width || py >= height) continue;
+    if (size > 1 && hash01(py * width + px + stroke.seed % 9973) < 0.07) continue;
+    coverPixel(stroke, px, py, strength, varying ? modeColour(stroke, px, py, distances[index / 2]) : stroke.colour);
+  }
+  // Stray pixels one or two pixels outside the edge.
+  const reach = wide / 2 + 1 + random() * 1.5, angle = random() * Math.PI * 2;
+  if (random() < 0.3) {
+    const px = Math.round(x + Math.cos(angle) * reach), py = Math.round(y + Math.sin(angle) * reach);
+    if (inBounds(stroke, px, py)) coverPixel(stroke, px, py, strength, varying ? modeColour(stroke, px, py, 1) : stroke.colour);
+  }
+}
+
+// One stamp of the stroke's brush type (see BRUSH_TYPES).
+export function stampBrush(stroke, x, y, size = stroke.size, strength = stroke.opacity) {
+  const type = stroke.type;
+  if (type === 'dither') stampDither(stroke, x, y, size, strength);
+  else if (type === 'spray') stampSpray(stroke, x, y, size, strength);
+  else if (type === 'jiggle') stampJiggle(stroke, x, y, size, strength);
+  else if (type === 'hatch') stampHatch(stroke, x, y, size, strength);
+  else if (type === 'noise' && !stroke.erase) stampNoise(stroke, x, y, size, strength);
+  else stamp(stroke, x, y, size, strength);
 }
 
 // The asset editor's sprayStamp: a scatter of single pixels in a square of
