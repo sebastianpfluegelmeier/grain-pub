@@ -8,9 +8,11 @@
    (pan-x pan-y leaves only scrolling); the canvas and the graph handle their
    own gestures with touch-action: none. */
 html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
-/* The visible height of the screen. Opened from the home screen, iOS makes a
-   page of height 100% end above the bottom edge of the display. */
-@supports (height: 100dvh) { html, body { height: 100dvh; } }
+/* Opened from the home screen with a translucent status bar, iOS lays the
+   page out as if the status bar still took its room: the page starts at the
+   top of the display but is too short by the bar's height, which leaves a
+   strip unused at the bottom. Adding that height back fills the display. */
+@media (display-mode: standalone) { html { height: calc(100% + env(safe-area-inset-top)); } }
 html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
 body.animator {
   display: flex; flex-direction: column;

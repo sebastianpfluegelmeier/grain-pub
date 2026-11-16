@@ -124,7 +124,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     const y1 = a.y + a.hh, y2 = b.y - b.hh - 1;
     return y2 - y1 >= 2 * STUB ? {kind: 'down', x1, y1, x2, y2, mid: (y1 + y2) / 2} : null;
   }
-  function wrapRoute(a, b, x1, x2, loop) {
+  function wrapRoute(a, b, x1, x2, loop, drop = STUB) {
     const y1 = a.y + a.hh, y2 = b.y - b.hh - 1;
     const aLeft = a.x - a.hw, aRight = a.x + a.hw, bLeft = b.x - b.hw, bRight = b.x + b.hw;
     let side, dir = 1;
@@ -133,9 +133,9 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     else if (aLeft - bRight >= 2 * STUB) { side = (bRight + aLeft) / 2;dir = -1; }
     else if (b.x >= a.x) side = Math.max(aRight, bRight) + SIDE_GAP;
     else { side = Math.min(aLeft, bLeft) - SIDE_GAP;dir = -1; }
-    return {kind: 'wrap', x1, y1, x2, y2, below: y1 + STUB, above: y2 - STUB, side, dir, loop};
+    return {kind: 'wrap', x1, y1, x2, y2, below: y1 + drop, above: y2 - STUB, side, dir, loop, drop};
   }
-  const route = (a, b, x1, x2, loop) => (!loop && downRoute(a, b, x1, x2)) || wrapRoute(a, b, x1, x2, loop);
+  const route = (a, b, x1, x2, loop, drop) => (!loop && downRoute(a, b, x1, x2)) || wrapRoute(a, b, x1, x2, loop, drop);
   function corners(r) {
     if (r.kind === 'down') {
       return Math.abs(r.x1 - r.x2) < 0.5 ? [[r.x1, r.y1], [r.x2, r.y2]] : [[r.x1, r.y1], [r.x1, r.mid], [r.x2, r.mid], [r.x2, r.y2]];
@@ -154,6 +154,19 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     }
     const last = points.at(-1);
     return d + `L${last[0]} ${last[1]}`;
+  }
+  // The length of that path. Every bend is a right angle, and a rounded one
+  // is shorter than its two straight ends by a fixed share of the radius.
+  function pathLength(points) {
+    let total = 0;
+    for (let index = 1; index < points.length; index++) total += Math.hypot(points[index][0] - points[index - 1][0], points[index][1] - points[index - 1][1]);
+    for (let index = 1; index < points.length - 1; index++) {
+      const before = Math.hypot(points[index][0] - points[index - 1][0], points[index][1] - points[index - 1][1]);
+      const after = Math.hypot(points[index + 1][0] - points[index][0], points[index + 1][1] - points[index][1]);
+      const radius = Math.min(CORNER, before / 2, after / 2);
+      if (radius >= 0.5) total -= radius * (2 - 1.6232);
+    }
+    return total;
   }
   // The frame count sits on the edge's longest inner piece, moved along it
   // when another edge's count is already there.
@@ -176,25 +189,49 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   // inlets from left to right in the order of the states they lead to, which
   // keeps edges from crossing right at the box. Pieces of different edges
   // that would run along the same line are moved one lane apart.
+  //
+  // Edges of the same kind into the same state form a bundle: they share one
+  // inlet and may run along the same line, so they join on the way there.
+  // Many loops on a state then take one lane around it instead of one each.
+  // The kinds are loop, one-way and bidirectional, each plain or cancelable.
+  const bundleKey = edge => `${edge.to}:${isLoop(edge) ? 'loop' : edge.bidirectional ? 'both' : 'one'}${edge.cancelable ? ':cancelable' : ''}`;
   function layout() {
     const d = doc();
     const positions = new Map();
     if (gesture?.type === 'move' && gesture.moved) positions.set(gesture.id, gesture.position);
     const outs = new Map(d.nodes.map(node => [node.id, []])), ins = new Map(d.nodes.map(node => [node.id, []]));
     for (const edge of d.edges) { outs.get(edge.from)?.push(edge);ins.get(edge.to)?.push(edge); }
-    const boxes = new Map(d.nodes.map(node => [node.id, box(node, positions, outs.get(node.id).length, ins.get(node.id).length)]));
+    const inCount = new Map([...ins].map(([id, list]) => [id, new Set(list.map(bundleKey)).size]));
+    const boxes = new Map(d.nodes.map(node => [node.id, box(node, positions, outs.get(node.id).length, inCount.get(node.id))]));
     const centre = id => boxes.get(id)?.x ?? 0;
     // Loops go last: they leave and return on the box's right.
     for (const list of outs.values()) list.sort((a, b) => isLoop(a) - isLoop(b) || centre(a.to) - centre(b.to) || a.id - b.id);
     for (const list of ins.values()) list.sort((a, b) => isLoop(a) - isLoop(b) || centre(a.from) - centre(b.from) || a.id - b.id);
 
+    // The inlet of each edge: one per bundle, in the order the bundles first appear.
+    const slot = new Map(), members = new Map();
+    for (const list of ins.values()) {
+      const seen = new Map();
+      for (const edge of list) {
+        const key = bundleKey(edge);
+        if (!seen.has(key)) seen.set(key, seen.size);
+        slot.set(edge, seen.get(key));
+        members.set(key, (members.get(key) ?? 0) + 1);
+      }
+    }
+    // In a bundle the frame count sits under the edge's own outlet, the one
+    // place that is not shared. Edges of a bundle that leave the same state
+    // have neighbouring outlets, so their counts alternate between two rows.
     const routes = [...d.edges].sort((a, b) => a.id - b.id).filter(edge => boxes.has(edge.from) && boxes.has(edge.to)).map(edge => {
-      const a = boxes.get(edge.from), b = boxes.get(edge.to);
-      return {edge, a, b, ...route(a, b, portX(a, outs.get(edge.from).indexOf(edge)), portX(b, ins.get(edge.to).indexOf(edge)), isLoop(edge))};
+      const a = boxes.get(edge.from), b = boxes.get(edge.to), key = bundleKey(edge), bundled = members.get(key) > 1;
+      const siblings = bundled ? outs.get(edge.from).filter(other => bundleKey(other) === key) : [edge];
+      const x1 = portX(a, outs.get(edge.from).indexOf(edge)), rows = Math.min(2, siblings.length);
+      const drop = bundled ? 9 + 13 * rows : STUB, r = route(a, b, x1, portX(b, slot.get(edge)), isLoop(edge), drop);
+      return {edge, a, b, key, ...r, drop, own: bundled ? {x: x1, y: r.y1 + 10 + (siblings.indexOf(edge) % 2) * 13} : null};
     });
     // Occupied lines: horizontal pieces by their y, vertical pieces by their x.
     const taken = {h: [], v: []};
-    const clash = (list, c, lo, hi) => list.some(piece => Math.abs(piece.c - c) < LANE - 0.5 && piece.lo < hi - 0.5 && lo < piece.hi - 0.5);
+    const clash = (list, c, lo, hi, key) => list.some(piece => piece.key !== key && Math.abs(piece.c - c) < LANE - 0.5 && piece.lo < hi - 0.5 && lo < piece.hi - 0.5);
     // Whether a piece would run through a state's box. A line behind a box
     // looks connected to it, so pieces keep clear of every box but their own.
     const boxList = [...boxes.values()];
@@ -204,7 +241,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         ? Math.abs(c - b.x) < b.hw + CLEARANCE && lo < b.y + b.hh + CLEARANCE && hi > b.y - b.hh - CLEARANCE
         : Math.abs(c - b.y) < b.hh + CLEARANCE && lo < b.x + b.hw + CLEARANCE && hi > b.x - b.hw - CLEARANCE));
     };
-    const take = (list, c, from, to) => { list.push({c, lo: Math.min(from, to), hi: Math.max(from, to)});return c; };
+    const take = (list, c, from, to, key) => { list.push({c, lo: Math.min(from, to), hi: Math.max(from, to), key});return c; };
     // The first of the candidate lines that is free; `fallback` when none is.
     const pick = (candidates, free, fallback) => candidates.find(free) ?? fallback;
     const outward = Array.from({length: 40}, (_, index) => index * LANE);
@@ -212,36 +249,39 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     // The pieces at the ports cannot move, so they are entered first.
     for (const r of routes) {
       const from = r.kind === 'down' ? r.mid : r.below, to = r.kind === 'down' ? r.mid : r.above;
-      taken.v.push({c: r.x1, lo: r.y1, hi: from}, {c: r.x2, lo: to, hi: r.y2});
+      taken.v.push({c: r.x1, lo: r.y1, hi: from, key: r.key}, {c: r.x2, lo: to, hi: r.y2, key: r.key});
     }
     const shapes = [], labels = [];
     let left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
     for (let r of routes) {
-      const {edge, a, b} = r;
+      const {edge, a, b, key, own} = r, rewrap = () => ({edge, a, b, key, own, ...wrapRoute(a, b, r.x1, r.x2, false, r.drop)});
       if (r.kind === 'down') {
         const lo = Math.min(r.x1, r.x2), hi = Math.max(r.x1, r.x2), straight = hi - lo < 0.5;
         const clear = mid => !blocked(true, r.x1, r.y1, mid, [a.id]) && !blocked(true, r.x2, mid, r.y2, [b.id]);
         if (straight) {
-          if (!clear(r.mid)) r = {edge, a, b, ...wrapRoute(a, b, r.x1, r.x2, false)};
+          if (!clear(r.mid)) r = rewrap();
         } else {
           const mids = around.map(offset => r.mid + offset).filter(mid => mid > r.y1 + CORNER && mid < r.y2 - CORNER);
-          const mid = pick(mids, mid => clear(mid) && !blocked(false, mid, lo, hi) && !clash(taken.h, mid, lo, hi), null);
-          if (mid === null) r = {edge, a, b, ...wrapRoute(a, b, r.x1, r.x2, false)};
-          else r.mid = take(taken.h, mid, lo, hi);
+          const mid = pick(mids, mid => clear(mid) && !blocked(false, mid, lo, hi) && !clash(taken.h, mid, lo, hi, key), null);
+          if (mid === null) r = rewrap();
+          else r.mid = take(taken.h, mid, lo, hi, key);
         }
       }
       if (r.kind === 'wrap') {
         // A loop only moves outwards, so its lanes nest around the box.
         const sides = (r.loop ? outward : around).map(offset => r.side + offset * r.dir);
-        r.side = take(taken.v, pick(sides, side => !blocked(true, side, r.above, r.below) && !clash(taken.v, side, r.above, r.below), r.side), r.above, r.below);
+        r.side = take(taken.v, pick(sides, side => !blocked(true, side, r.above, r.below) && !clash(taken.v, side, r.above, r.below, key), r.side), r.above, r.below, key);
         const lanes = (base, sign, x) => pick(outward.map(offset => base + sign * offset),
-          y => !blocked(false, y, x, r.side) && !clash(taken.h, y, Math.min(x, r.side), Math.max(x, r.side)), base);
-        r.below = take(taken.h, lanes(r.below, 1, r.x1), r.x1, r.side);
-        r.above = take(taken.h, lanes(r.above, -1, r.x2), r.x2, r.side);
+          y => !blocked(false, y, x, r.side) && !clash(taken.h, y, Math.min(x, r.side), Math.max(x, r.side), key), base);
+        r.below = take(taken.h, lanes(r.below, 1, r.x1), r.x1, r.side, key);
+        r.above = take(taken.h, lanes(r.above, -1, r.x2), r.x2, r.side, key);
       }
       const points = corners(r);
       for (const [x, y] of points) { left = Math.min(left, x);right = Math.max(right, x);top = Math.min(top, y);bottom = Math.max(bottom, y); }
-      shapes.push({edge, d: roundedPath(points), label: labelPoint(points, labels), loop: isLoop(edge)});
+      if (own) labels.push(own);
+      // Dashes are counted from the end of the line, so the dashed edges of a
+      // bundle lie exactly on each other where they share it.
+      shapes.push({edge, d: roundedPath(points), label: own ?? labelPoint(points, labels), loop: isLoop(edge), dash: (7 - pathLength(points) % 7) % 7});
     }
     for (const b of boxes.values()) {
       left = Math.min(left, b.x - b.hw);right = Math.max(right, b.x + b.hw);
@@ -249,7 +289,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     }
     const outlet = (id, index) => { const b = boxes.get(id);return {x: portX(b, index), y: b.y + b.hh}; };
     const inlet = (id, index) => { const b = boxes.get(id);return {x: portX(b, index), y: b.y - b.hh}; };
-    return {boxes, shapes, outs, ins, outlet, inlet, bounds: {left, right, top, bottom}};
+    return {boxes, shapes, outs, inCount, outlet, inlet, bounds: {left, right, top, bottom}};
   }
   function nodeAt(point, boxes) {
     const list = [...boxes.values()].reverse();
@@ -323,14 +363,17 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     emptyLine.hidden = d.nodes.length > 0;
     const coarse = globalThis.matchMedia?.('(pointer: coarse)').matches;
     emptyLine.textContent = session.readOnly ? 'This animation has no states.' : `${coarse ? 'Double-tap' : 'Double-click'} to add a state.`;
-    const {boxes, shapes, outs, ins, outlet, inlet} = layout();
+    const {boxes, shapes, outs, inCount, outlet, inlet} = layout();
     const selected = selection();
     // The selection is kept through the preview but not drawn, because its
     // accent colour would read as the playing edge.
     const isSelected = (kind, id) => !preview && selected?.kind === kind && selected.id === id;
     const name = id => nodeById(d, id)?.name ?? '';
     let markup = '';
-    for (const {edge, d: path, label, loop} of shapes) {
+    // The selected and the playing edge are drawn last, on top of the lines
+    // they share with others.
+    const front = shape => Number(isSelected('edge', shape.edge.id) || highlight?.edge === shape.edge.id);
+    for (const {edge, d: path, label, loop, dash} of [...shapes].sort((a, b) => front(a) - front(b))) {
       const playing = highlight?.edge === edge.id, reversed = playing && Boolean(highlight.reversed);
       const both = !loop && edge.bidirectional;
       const classes = ['anim-edge', edge.cancelable && 'cancelable', isSelected('edge', edge.id) && 'selected', playing && 'playing', reversed && 'reversed'].filter(Boolean).join(' ');
@@ -346,7 +389,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       markup += `<g class="${classes}" data-edge="${edge.id}" role="button" aria-label="${text(description + ', ' + flags)}">
         <title>${text(description + ', ' + flags)}</title>
         <path class="anim-edge-hit" d="${path}"/>
-        <path class="anim-edge-line" d="${path}" marker-end="${endMarker}" ${both ? `marker-start="${startMarker}"` : ''}/>
+        <path class="anim-edge-line" d="${path}" marker-end="${endMarker}" ${both ? `marker-start="${startMarker}"` : ''} ${edge.cancelable ? `stroke-dashoffset="${dash.toFixed(2)}"` : ''}/>
         <rect class="anim-edge-label-bg" x="${label.x - labelWidth / 2}" y="${label.y - 7}" width="${labelWidth}" height="14"/>
         <text class="anim-edge-label" x="${label.x}" y="${label.y + 3.5}" text-anchor="middle">${frames}</text>
       </g>`;
@@ -360,7 +403,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       const ports = (count, y) => Array.from({length: count}, (_, index) => `<rect class="anim-port" x="${left + index * PORT_STEP}" y="${y}" width="${PORT_WIDTH}" height="${PORT_HEIGHT}"/>`).join('');
       markup += `<g class="${classes}" data-node="${node.id}" role="button" aria-label="${text(`State ${node.name}, id ${node.id}`)}">
         <rect class="anim-node-box" x="${left}" y="${top}" width="${b.hw * 2}" height="${b.hh * 2}"/>
-        ${ports(ins.get(node.id).length, top)}${ports(outs.get(node.id).length, bottom - PORT_HEIGHT)}
+        ${ports(inCount.get(node.id), top)}${ports(outs.get(node.id).length, bottom - PORT_HEIGHT)}
         <text class="anim-node-name" x="${left + NODE_PAD}" y="${b.y + 4}">${text(node.name)}</text>
         <text class="anim-node-id" x="${b.x + b.hw - NODE_PAD}" y="${b.y + 4}" text-anchor="end">${node.id}</text>
       </g>`;
@@ -380,7 +423,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       const from = boxes.get(gesture.from), start = outlet(gesture.from, outs.get(gesture.from).length);
       let points;
       if (target !== null) {
-        const to = boxes.get(target), end = inlet(target, ins.get(target).length);
+        const to = boxes.get(target), end = inlet(target, inCount.get(target));
         points = corners(route(from, to, start.x, end.x, target === gesture.from));
       } else {
         const {x, y} = gesture.point;
@@ -470,7 +513,9 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     } else if (run(doc => deleteEdge(doc, selected.id))) session.select(null);
   }
   function addEdgeBetween(from, to) {
-    const edge = run(doc => addEdge(doc, from, to));
+    // A loop is the resting animation of its state, and a request should be
+    // able to leave it at once, so a new loop starts out cancelable.
+    const edge = run(doc => { const added = addEdge(doc, from, to);if (from === to) added.cancelable = true;return added; });
     if (edge) session.select({kind: 'edge', id: edge.id});
   }
   function addNodeAt(point) {
