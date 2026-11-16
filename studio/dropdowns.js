@@ -1,10 +1,14 @@
 // Keep native selects as the form controls; render their menus inside the app.
 let active=null, nextId=0;
+// True while the menu was opened by a finger or a pen. A touch screen opens
+// its own picker whenever a select is tapped or focused, so there the select
+// is never focused and the tap is kept from reaching it.
+let byTouch=false;
 function closeMenu(restoreFocus=false) {
   if(!active)return;
   const {select,menu}=active;active=null;
   menu.remove();select.setAttribute('aria-expanded','false');select.removeAttribute('aria-controls');
-  if(restoreFocus && select.isConnected)select.focus({preventScroll:true});
+  if(restoreFocus && !byTouch && select.isConnected)select.focus({preventScroll:true});
 }
 function openMenu(select) {
   if(select.disabled)return;
@@ -70,10 +74,24 @@ function openMenu(select) {
 }
 document.addEventListener('pointerdown',event=>{
   const select=event.target.closest('select');
-  if(select && !select.multiple){event.preventDefault();select.focus({preventScroll:true});openMenu(select);}
+  if(select && !select.multiple){
+    byTouch=event.pointerType==='touch' || event.pointerType==='pen';
+    event.preventDefault();if(!byTouch)select.focus({preventScroll:true});openMenu(select);
+  }
   else if(active && !active.menu.contains(event.target))closeMenu();
 },true);
 document.addEventListener('click',event=>{if(event.target.closest('select'))event.preventDefault();},true);
+// Browsers that still send the mouse press after a cancelled pointer press
+// would open their own list on it.
+document.addEventListener('mousedown',event=>{if(event.target.closest?.('select:not([multiple])'))event.preventDefault();},true);
+// Cancelling a pointer event does not stop what a touch does by default; only
+// cancelling the touch itself keeps the system picker closed. The listeners
+// must not be passive for that.
+for(const type of ['touchstart','touchend'])document.addEventListener(type,event=>{
+  if(event.target.closest?.('select:not([multiple])') && event.cancelable)event.preventDefault();
+},{capture:true,passive:false});
+// Some systems still open the picker when a select takes focus by other means.
+document.addEventListener('focusin',event=>{if(byTouch && active && event.target===active.select)event.target.blur();},true);
 document.addEventListener('keydown',event=>{
   if(event.target.tagName!=='SELECT' || event.target.multiple || event.key==='Tab')return;
   if(['ArrowDown','ArrowUp','Enter',' '].includes(event.key)){
