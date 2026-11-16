@@ -1065,6 +1065,12 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     else if (button.matches('[data-zoom-out]')) zoomStep(-1);
     else if (button.matches('[data-canvas-fit]')) fit();
   });
+  // A held − or + button sends input events; the grid follows them at once.
+  // A half-typed number below the limit waits for the change event.
+  parent.querySelector('.anim-guides').addEventListener('input', event => {
+    const input = event.target, value = Number(input.value);
+    if (input.matches('[data-grid-step]') && value >= GRID_STEP_MIN && value <= GRID_STEP_MAX) setGuides({[input.dataset.gridStep]: value});
+  });
   parent.querySelector('.anim-guides').addEventListener('change', event => {
     const input = event.target;
     if (input.matches('[data-grid-step]')) { setGuides({[input.dataset.gridStep]: input.value});input.value = String(guides[input.dataset.gridStep]); }

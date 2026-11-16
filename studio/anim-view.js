@@ -83,6 +83,63 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       </form>
     </dialog>`;
   const $ = selector => parent.querySelector(selector);
+  // Number fields get a − and a + button, so a value can be changed without
+  // the on-screen keyboard. The parts rebuild their markup, so new fields are
+  // picked up as they appear. The colour fields already sit beside sliders.
+  const addSteppers = () => {
+    for (const input of parent.querySelectorAll('input[type=number]:not([data-stepped])')) {
+      input.dataset.stepped = '';
+      if (input.closest('.anim-colour-panel')) continue;
+      const what = input.getAttribute('aria-label') || input.closest('label')?.textContent.trim() || 'value';
+      const wrap = document.createElement('span');
+      wrap.className = 'anim-stepper';
+      input.replaceWith(wrap);
+      wrap.innerHTML = `<button type="button" data-step="-1" aria-label="Decrease ${what}" title="Decrease ${what}">${icon('minus')}</button><button type="button" data-step="1" aria-label="Increase ${what}" title="Increase ${what}">${icon('plus')}</button>`;
+      wrap.firstChild.after(input);
+    }
+  };
+  let stepping = null;
+  const stepField = (button, count = 1) => {
+    const input = button.parentElement.querySelector('input');
+    if (!input || input.disabled) return null;
+    const before = input.value;
+    if (input.value === '') input.value = input.min || '0';
+    else if (button.dataset.step === '1') input.stepUp(count);
+    else input.stepDown(count);
+    if (input.value !== before) input.dispatchEvent(new Event('input', {bubbles: true}));
+    return input;
+  };
+  // The field reports the change once, when the press ends, so a held button
+  // is one edit.
+  const stopStepping = () => {
+    if (!stepping) return;
+    clearTimeout(stepping.timer);
+    const {input} = stepping;
+    stepping = null;
+    input.dispatchEvent(new Event('change', {bubbles: true}));
+  };
+  parent.addEventListener('pointerdown', event => {
+    const button = event.target.closest?.('.anim-stepper [data-step]');
+    if (!button || button.disabled) return;
+    stopStepping();
+    const input = stepField(button);
+    if (!input) return;
+    // A held button repeats, and steps in fives after a while.
+    let repeats = 0;
+    const repeat = () => { stepField(button, ++repeats > 12 ? 5 : 1);stepping.timer = setTimeout(repeat, 70); };
+    stepping = {input, timer: setTimeout(repeat, 400)};
+  });
+  for (const type of ['pointerup', 'pointercancel']) window.addEventListener(type, stopStepping);
+  // The keyboard and assistive tools press the button without a pointer.
+  parent.addEventListener('click', event => {
+    const button = event.target.closest?.('.anim-stepper [data-step]');
+    if (!button || event.detail !== 0) return;
+    stepField(button)?.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+  const stepperObserver = typeof MutationObserver === 'function' ? new MutationObserver(addSteppers) : null;
+  stepperObserver?.observe(parent, {childList: true, subtree: true});
+  addSteppers();
+
   const regions = {list: $('.anim-list'), canvas: $('#anim-canvas'), graph: $('#anim-graph'), details: $('#anim-details'), timeline: $('#anim-timeline')};
 
   let items = [], folders = [], selectedKey = null, listVersion = 0, openVersion = 0, visible = false;
@@ -512,7 +569,8 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     resizeForm.elements.anchor.value = 'center';
     $('[data-resize-error]').textContent = '';
     resizeDialog.showModal?.();
-    resizeForm.elements.width.focus();resizeForm.elements.width.select();
+    // On a touch screen focusing the field would bring up the keyboard.
+    if (!globalThis.matchMedia?.('(pointer: coarse)').matches) { resizeForm.elements.width.focus();resizeForm.elements.width.select(); }
   }
   $('[data-resize-cancel]').onclick = () => resizeDialog.close?.();
   resizeForm.onsubmit = event => {
@@ -631,6 +689,9 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       window.removeEventListener('blur', saveOnBlur);
       window.removeEventListener('beforeunload', saveOnUnload);
       window.removeEventListener('pagehide', saveOnUnload);
+      for (const type of ['pointerup', 'pointercancel']) window.removeEventListener(type, stopStepping);
+      stepperObserver?.disconnect();
+      clearTimeout(stepping?.timer);
       for (const part of parts) part.destroy?.();
       parent.replaceChildren();
     },

@@ -198,6 +198,11 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-tool-group { display: flex; gap: 2px; padding: 0 8px; }
 .anim-tool-group:first-child { padding-left: 0; }
 .anim-tool-group:not(:last-child) { border-right: 1px dotted var(--line); }
+.anim-stepper { display: inline-flex; align-items: center; flex-shrink: 0; }
+.anim-stepper button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 28px; padding: 4px; border: 0; background: transparent; color: var(--muted); }
+.anim-stepper button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.anim-stepper input[type=number] { text-align: center; appearance: textfield; -moz-appearance: textfield; }
+.anim-stepper input::-webkit-inner-spin-button, .anim-stepper input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .anim-grid-step { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; color: var(--muted); font-size: 11px; }
 .anim-grid-step input { width: 40px; padding: 4px 2px; font-size: 12px; text-align: center; }
 .anim-tools button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 7px; color: var(--muted); }
@@ -356,6 +361,7 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   /* Icon buttons. */
   .anim-tools button { width: 40px; height: 40px; padding: 10px; }
   .anim-grid-step input { width: 48px; min-height: 40px; font-size: 16px; }
+  .anim-stepper button, .anim-tools .anim-stepper button { width: 36px; height: 40px; padding: 9px; }
   .anim-position:empty { display: none; }
   .anim-colour-head { flex-wrap: wrap; }
   .anim-hex { flex-basis: 100%; }
