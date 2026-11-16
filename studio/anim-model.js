@@ -209,6 +209,60 @@ export function renameNode(doc, id, name) {
   return node;
 }
 
+// Positions that arrange the states in rows, as {id: {x, y}}. The state with
+// the most edges goes on top; every other state goes one row below the
+// nearest row it is connected to, so connected states end up next to each
+// other and most edges run straight between two rows or along one. Within a
+// row the states stand in the order of the states they connect to above.
+// Parts of the graph that are not connected stand side by side. The
+// arrangement keeps the middle of the graph where it was. `widthOf(node)` is
+// the width of a state's box.
+export function tidyPositions(doc, widthOf = () => 64, {rowGap = 110, columnGap = 56} = {}) {
+  const nodes = doc.nodes, result = new Map();
+  if (!nodes.length) return result;
+  const near = new Map(nodes.map(node => [node.id, new Set()]));
+  for (const edge of doc.edges) if (edge.from !== edge.to && near.has(edge.from) && near.has(edge.to)) { near.get(edge.from).add(edge.to);near.get(edge.to).add(edge.from); }
+  const degree = id => doc.edges.filter(edge => edge.from === id || edge.to === id).length;
+  const byWeight = [...nodes].sort((a, b) => degree(b.id) - degree(a.id) || a.id - b.id);
+  const placed = new Set();
+  let offset = 0;
+  for (const root of byWeight) {
+    if (placed.has(root.id)) continue;
+    // Rows by distance from the root.
+    const rows = [[root.id]];
+    placed.add(root.id);
+    for (;;) {
+      const next = [];
+      for (const id of rows.at(-1)) for (const other of [...near.get(id)].sort((a, b) => a - b)) if (!placed.has(other)) { placed.add(other);next.push(other); }
+      if (!next.length) break;
+      rows.push(next);
+    }
+    // Order each row by where its neighbours in the row above stand.
+    const place = new Map([[root.id, 0]]);
+    for (let index = 1; index < rows.length; index++) {
+      const above = new Set(rows[index - 1]);
+      const middle = id => { const list = [...near.get(id)].filter(other => above.has(other)).map(other => place.get(other));return list.reduce((sum, value) => sum + value, 0) / list.length; };
+      const keys = new Map(rows[index].map(id => [id, middle(id)]));
+      rows[index].sort((a, b) => keys.get(a) - keys.get(b) || a - b);
+      rows[index].forEach((id, position) => place.set(id, position - (rows[index].length - 1) / 2));
+    }
+    const width = id => widthOf(nodes.find(node => node.id === id));
+    const rowWidth = row => row.reduce((sum, id) => sum + width(id), 0) + columnGap * (row.length - 1);
+    const total = Math.max(...rows.map(rowWidth));
+    rows.forEach((row, index) => {
+      let x = offset + (total - rowWidth(row)) / 2;
+      for (const id of row) { result.set(id, {x: x + width(id) / 2, y: index * rowGap});x += width(id) + columnGap; }
+    });
+    offset += total + 2 * columnGap;
+  }
+  // Keep the middle of the graph in place, on whole tens.
+  const middleOf = list => (Math.min(...list) + Math.max(...list)) / 2;
+  const dx = middleOf(nodes.map(node => node.x)) - middleOf([...result.values()].map(spot => spot.x));
+  const dy = middleOf(nodes.map(node => node.y)) - middleOf([...result.values()].map(spot => spot.y));
+  for (const spot of result.values()) { spot.x = Math.round((spot.x + dx) / 10) * 10;spot.y = Math.round((spot.y + dy) / 10) * 10; }
+  return result;
+}
+
 export function moveNode(doc, id, x, y) {
   const node = needNode(doc, id);
   node.x = coordinate(x);
