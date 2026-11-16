@@ -219,6 +219,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-option input[type=range] { width: 88px; }
 .anim-option output { min-width: 32px; color: var(--text); font: 11px var(--mono); }
 .anim-option select { padding: 4px 20px 4px 2px; font-size: 12px; }
+/* A control that cannot be used now looks it, so it does not seem broken. */
+#animation-view :is(select, input[type=range]):disabled { opacity: 0.35; cursor: default; }
 /* A sample stroke of the chosen brush type, drawn in the text colour. */
 .anim-brush-preview { flex: none; width: 60px; height: 24px; background: var(--text); mask-size: 100% 100%; -webkit-mask-size: 100% 100%; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; image-rendering: pixelated; }
 .anim-option button, .anim-zoom button[data-canvas-fit] { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }

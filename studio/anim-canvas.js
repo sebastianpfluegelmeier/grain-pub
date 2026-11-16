@@ -569,16 +569,18 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     const host = $('[data-options]');
     if (key !== renderedOptions) {
       renderedOptions = key;
+      // The brush settings stay usable without a frame to draw on, so a brush
+      // can be set up before an edge is selected. What acts on a frame is off.
       const disabled = editable() ? '' : 'disabled';
       const parts = [];
-      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints">Type<select data-brush-type ${disabled}>${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}" data-preview="${typePreview(item.id)}">${item.label}</option>`).join('')}</select><span class="anim-brush-preview" data-brush-preview aria-hidden="true"></span></label>`);
-      if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])">Size<input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1" ${disabled}><output data-size-value></output></label>`);
+      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints">Type<select data-brush-type>${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}" data-preview="${typePreview(item.id)}">${item.label}</option>`).join('')}</select><span class="anim-brush-preview" data-brush-preview aria-hidden="true"></span></label>`);
+      if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])">Size<input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1"><output data-size-value></output></label>`);
       if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button class="anim-icon-button" data-shape="square" aria-label="Square brush" title="Square brush">${icon('shape-square')}</button><button class="anim-icon-button" data-shape="round" aria-label="Round brush" title="Round brush">${icon('shape-round')}</button></span>`);
-      if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1" ${disabled}><output data-opacity-value></output></label>`);
-      if (options.includes('density')) parts.push(`<label class="anim-option" title="How dense the pattern of the brush type is">Density<input type="range" data-density min="1" max="100" step="1" ${disabled}><output data-density-value></output></label>`);
-      if (options.includes('pressure')) parts.push(`<label class="anim-option" title="What pen pressure changes">Pressure<select data-pressure ${disabled}><option value="off">none</option><option value="size">size</option><option value="opacity">opacity</option></select></label>`);
+      if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1"><output data-opacity-value></output></label>`);
+      if (options.includes('density')) parts.push(`<label class="anim-option" title="How dense the pattern of the brush type is">Density<input type="range" data-density min="1" max="100" step="1"><output data-density-value></output></label>`);
+      if (options.includes('pressure')) parts.push(`<label class="anim-option" title="What pen pressure changes">Pressure<select data-pressure><option value="off">none</option><option value="size">size</option><option value="opacity">opacity</option></select></label>`);
       if (options.includes('values')) {
-        const select = (channel) => `<label class="anim-option" title="Where each pixel lies between the first and the second colour">${optionLabel(d, channel)}<select data-mode="${channel}" ${disabled}>${VALUE_MODES.map(mode => `<option value="${mode}" title="${MODE_TITLES[mode]}">${MODE_LABELS[mode]}</option>`).join('')}</select></label>`;
+        const select = (channel) => `<label class="anim-option" title="Where each pixel lies between the first and the second colour">${optionLabel(d, channel)}<select data-mode="${channel}">${VALUE_MODES.map(mode => `<option value="${mode}" title="${MODE_TITLES[mode]}">${MODE_LABELS[mode]}</option>`).join('')}</select></label>`;
         parts.push(select('colour'));
         if (d.format !== 'field') parts.push(select('alpha'));
       }
