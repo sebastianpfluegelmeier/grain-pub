@@ -634,6 +634,27 @@ export function findCorner(s, fx, fy, radius, threshold = 0.3) {
   return best;
 }
 
+// The straight hard edges nearest to (fx, fy) within `radius` pixels, as
+// {x, y}: `y` is the pixel edge of a horizontal edge crossing the pointer's
+// column, `x` that of a vertical edge crossing its row, and each is null when
+// there is none. An edge counts when it is hard on at least two pixels in a
+// row, so single specks do not catch the pointer.
+export function findEdges(s, fx, fy, radius, threshold = 0.3) {
+  const {width, height} = s, cx = clamp(Math.floor(fx), 0, width - 1), cy = clamp(Math.floor(fy), 0, height - 1);
+  const hard = (ax, ay, bx, by) => ax >= 0 && ay >= 0 && bx < width && by < height && ax < width && ay < height && bx >= 0 && by >= 0
+    && contrastOf(inkAt(s, ax, ay), inkAt(s, bx, by)) > threshold;
+  let x = null, y = null;
+  for (let edge = Math.max(1, Math.ceil(fy - radius)); edge <= Math.min(height - 1, Math.floor(fy + radius)); edge++) {
+    const across = column => hard(column, edge - 1, column, edge);
+    if (across(cx) && (across(cx - 1) || across(cx + 1)) && (y === null || Math.abs(edge - fy) < Math.abs(y - fy))) y = edge;
+  }
+  for (let edge = Math.max(1, Math.ceil(fx - radius)); edge <= Math.min(width - 1, Math.floor(fx + radius)); edge++) {
+    const across = row => hard(edge - 1, row, edge, row);
+    if (across(cy) && (across(cy - 1) || across(cy + 1)) && (x === null || Math.abs(edge - fx) < Math.abs(x - fx))) x = edge;
+  }
+  return {x, y};
+}
+
 // A filled rectangle between two corners, both included. Like the asset
 // editor's drawSquare it ignores the brush size.
 export function strokeRect(stroke, from, to) {

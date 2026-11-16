@@ -5,7 +5,7 @@
 // step per stroke, so a stroke is painted into the frame as the pointer moves
 // and recorded at pointer up with the copy taken at pointer down.
 
-import {surface, createStroke, resetStroke, stamp, stampBrush, BRUSH_TYPES, brushType, findCorner, stampBlur, stampDisplace, strokeLine, strokeRect,
+import {surface, createStroke, resetStroke, stamp, stampBrush, BRUSH_TYPES, brushType, findCorner, findEdges, stampBlur, stampDisplace, strokeLine, strokeRect,
   drawGradient, floodFill, pick, rectFrom, clipRect, copyRect, clearRect, paste, moveRect, shift, flip, rotate, canRotate, toRGBA, addGhost,
   footprint, inside, paintTargets, MIN_BRUSH, MAX_BRUSH, VALUE_MODES, TWEEN_MODES, toHex, decodeValue} from './anim-paint.js';
 import {createColourPicker} from './anim-colour.js';
@@ -696,15 +696,39 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     renderChrome();requestDraw();
   }
   const snapActive = () => (guides.snap || guides.corners) && tool().kind === 'drag' && editable();
-  // The drawn corner near the pointer, when corner snapping is on. During a
-  // drag it is looked for in the frame from before the drag, so the shape
-  // being drawn does not catch itself. The reach is a fixed distance on
-  // screen, so it does not grow when zoomed out.
-  function cornerNear(p) {
+  // What is drawn near the pointer to snap to, when corner snapping is on,
+  // as {x, y} on pixel edges; an axis without a target is null. A corner
+  // gives both. Without one, a straight edge under the pointer gives the
+  // axis across it, so a shape can end on a line anywhere along it.
+  //
+  // The frame being drawn is searched first, then the onion skin frames that
+  // are shown. A corner of an onion frame counts for less, so it wins only
+  // when the drawing has none that is about as close; its edges are used only
+  // when the drawing has none in reach. During a drag the frame from before
+  // the drag is searched, so the shape being drawn does not catch itself.
+  // The reach is a fixed distance on screen and does not grow when zoomed out.
+  const ONION_WEIGHT = 0.6;
+  function drawnNear(p) {
     const d = doc();
     if (!guides.corners || !d) return null;
-    const data = gesture?.type === 'drag' ? gesture.entries[0]?.base : d.pixels.get(frameId());
-    return data ? findCorner(surface(d.format, d.width, d.height, data), p.fx, p.fy, clamp(14 / view.k, 1.5, 12)) : null;
+    const current = gesture?.type === 'drag' ? gesture.entries[0]?.base : d.pixels.get(frameId());
+    const frames = [current, ...currentGhosts().map(ghost => d.pixels.get(ghost.id))].filter(Boolean).map(data => surface(d.format, d.width, d.height, data));
+    const radius = clamp(14 / view.k, 1.5, 12);
+    let best = null;
+    frames.forEach((frame, index) => {
+      const corner = findCorner(frame, p.fx, p.fy, radius), score = corner ? corner.score * (index ? ONION_WEIGHT : 1) : 0;
+      if (corner && (!best || score > best.score)) best = {x: corner.x, y: corner.y, score};
+    });
+    // A corner close to the pointer (8 pixels on screen) always wins. One
+    // further away gives way to a straight edge that is in reach, so aiming at
+    // the middle of a short side does not jump to its ends.
+    const corner = best && {x: best.x, y: best.y};
+    if (corner && Math.hypot(corner.x - p.fx, corner.y - p.fy) * view.k <= 8) return corner;
+    for (const frame of frames) {
+      const edges = findEdges(frame, p.fx, p.fy, Math.max(1, radius * 0.6));
+      if (edges.x !== null || edges.y !== null) return edges;
+    }
+    return corner;
   }
   // One axis of a rectangle between its first corner and the pointer, as the
   // first and last pixel. Each end is a pixel edge when it is snapped
@@ -719,39 +743,42 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   }
   // The two ends of a shape for the pointer at `p`, and the snap marker.
   // `start` is the result from the press: a line and a gradient keep their
-  // first pixel, a rectangle keeps its first corner. A drawn corner near the
-  // pointer wins over the grid.
+  // first pixel, a rectangle keeps its first corner. Each axis snaps on its
+  // own: to something drawn when there is a target, else to the grid when
+  // the grid snap is on, else not at all.
   function shapeEnds(p, start) {
     const d = doc();
     if (!snapActive()) { const point = {x: p.x, y: p.y};return {from: start?.from ?? point, to: point, mark: null}; }
-    const found = cornerNear(p);
+    const found = drawnNear(p) ?? {x: null, y: null};
+    const axes = [['x', p.fx, p.x, d.width, guides.gridW], ['y', p.fy, p.y, d.height, guides.gridH]];
+    // The marker stands on the targets; on an axis without one it follows the pointer.
+    const markOf = marks => marks.x === null && marks.y === null ? null : {x: marks.x ?? p.fx, y: marks.y ?? p.fy};
     if (tool().id === 'rectangle') {
-      const edgesX = snapEdges(d.width, guides.gridW, guides.centre), edgesY = snapEdges(d.height, guides.gridH, guides.centre);
-      // The first corner: {x, y} on pixel edges when snapped, else the pixel under the pointer.
-      const anchor = start?.anchor ?? (found ? {edge: {x: found.x, y: found.y}} : guides.snap ? {edge: {x: nearest(edgesX, p.fx), y: nearest(edgesY, p.fy)}} : {cell: {x: p.x, y: p.y}});
+      // The first corner, per axis: a pixel edge when snapped, and the pixel under the pointer.
+      const anchor = start?.anchor ?? Object.fromEntries(axes.map(([key, position, cell, size, step]) =>
+        [key, {edge: found[key] ?? (guides.snap ? nearest(snapEdges(size, step, guides.centre), position) : null), cell}]));
       // Before the press the marker shows where the first corner would go.
-      if (!start && !p.pressed) return {anchor, from: null, to: null, mark: anchor.edge ?? null};
-      const axis = (key, position, cell, edges) => {
-        const edge = anchor.edge ? anchor.edge[key] : null;
-        let mark = found && found[key] !== edge ? found[key] : null;
-        if (mark === null && guides.snap && edge !== null) mark = snapSpan(edge, position, edges).mark;
-        const [lo, hi] = rectSpan(edge, anchor.cell ? anchor.cell[key] : null, mark, cell);
-        return {lo, hi, mark};
-      };
-      const ax = axis('x', p.fx, p.x, edgesX), ay = axis('y', p.fy, p.y, edgesY);
-      const mark = ax.mark === null && ay.mark === null ? null : {x: ax.mark ?? Math.round(p.fx), y: ay.mark ?? Math.round(p.fy)};
-      return {anchor, from: {x: ax.lo, y: ay.lo}, to: {x: ax.hi, y: ay.hi}, mark};
+      if (!start && !p.pressed) return {anchor, from: null, to: null, mark: markOf({x: anchor.x.edge, y: anchor.y.edge})};
+      const spans = {}, marks = {};
+      for (const [key, position, cell, size, step] of axes) {
+        const {edge, cell: anchorCell} = anchor[key];
+        let mark = found[key] !== null && found[key] !== edge ? found[key] : null;
+        if (mark === null && guides.snap && edge !== null) mark = snapSpan(edge, position, snapEdges(size, step, guides.centre)).mark;
+        spans[key] = rectSpan(edge, anchorCell, mark, cell);marks[key] = mark;
+      }
+      return {anchor, from: {x: spans.x[0], y: spans.y[0]}, to: {x: spans.x[1], y: spans.y[1]}, mark: markOf(marks)};
     }
-    let point = {x: p.x, y: p.y}, mark = null;
-    if (found) {
-      // Of the four pixels at the corner, the one on the pointer's side.
-      point = {x: clamp(p.fx >= found.x ? found.x : found.x - 1, 0, d.width - 1), y: clamp(p.fy >= found.y ? found.y : found.y - 1, 0, d.height - 1)};
-      mark = {x: found.x, y: found.y};
-    } else if (guides.snap) {
-      const sx = snapPixel(p.fx, d.width, guides.gridW, guides.centre), sy = snapPixel(p.fy, d.height, guides.gridH, guides.centre);
-      point = {x: sx.pixel, y: sy.pixel};mark = {x: sx.mark, y: sy.mark};
+    const point = {}, marks = {};
+    for (const [key, position, cell, size, step] of axes) {
+      if (found[key] !== null) {
+        // Of the two pixels at the target, the one on the pointer's side.
+        point[key] = clamp(position >= found[key] ? found[key] : found[key] - 1, 0, size - 1);marks[key] = found[key];
+      } else if (guides.snap) {
+        const snapped = snapPixel(position, size, step, guides.centre);
+        point[key] = snapped.pixel;marks[key] = snapped.mark;
+      } else { point[key] = cell;marks[key] = null; }
     }
-    return {from: start?.from ?? point, to: point, mark};
+    return {from: start?.from ?? point, to: point, mark: markOf(marks)};
   }
   const brushSize = () => brush.size;
   // Pen pressure changes size or opacity when the brush asks for it; a mouse
