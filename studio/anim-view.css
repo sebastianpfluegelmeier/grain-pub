@@ -219,6 +219,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-option input[type=range] { width: 88px; }
 .anim-option output { min-width: 32px; color: var(--text); font: 11px var(--mono); }
 .anim-option select { padding: 4px 20px 4px 2px; font-size: 12px; }
+/* A sample stroke of the chosen brush type, drawn in the text colour. */
+.anim-brush-preview { flex: none; width: 60px; height: 24px; background: var(--text); mask-size: 100% 100%; -webkit-mask-size: 100% 100%; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; image-rendering: pixelated; }
 .anim-option button, .anim-zoom button[data-canvas-fit] { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
 .anim-option button:hover:not(:disabled), .anim-zoom button:hover:not(:disabled) { color: var(--text); background: transparent; }
 .anim-scope { margin-left: auto; gap: 12px; }
@@ -364,6 +366,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-tools button { width: 40px; height: 40px; padding: 10px; }
   .anim-grid-step input { width: 48px; min-height: 40px; font-size: 16px; }
   .anim-stepper button, .anim-tools .anim-stepper button { width: 36px; height: 40px; padding: 9px; }
+  .studio-option { min-height: 44px; padding-top: 12px; padding-bottom: 12px; font-size: 14px; }
+  .studio-option[aria-selected="true"]::after { top: 19px; }
   /* Tighter, so the bar stays on one row on a portrait tablet. */
   .anim-timeline-bar { gap: 0 10px; }
   .anim-position:empty { display: none; }

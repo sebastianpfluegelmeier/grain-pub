@@ -571,7 +571,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
       renderedOptions = key;
       const disabled = editable() ? '' : 'disabled';
       const parts = [];
-      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints">Type<select data-brush-type ${disabled}>${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}">${item.label}</option>`).join('')}</select></label>`);
+      if (options.includes('type')) parts.push(`<label class="anim-option" title="Brush type: the shape of the tip and how it paints">Type<select data-brush-type ${disabled}>${BRUSH_TYPES.filter(item => !(item.pen && t.erase)).map(item => `<option value="${item.id}" data-preview="${typePreview(item.id)}">${item.label}</option>`).join('')}</select><span class="anim-brush-preview" data-brush-preview aria-hidden="true"></span></label>`);
       if (options.includes('size')) parts.push(`<label class="anim-option" title="Brush size, ${MIN_BRUSH} to ${MAX_BRUSH} pixels ([ and ])">Size<input type="range" data-size min="0" max="${SIZE_SLIDER_MAX}" step="1" ${disabled}><output data-size-value></output></label>`);
       if (options.includes('shape')) parts.push(`<span class="anim-option anim-segmented" role="group" aria-label="Brush shape"><button class="anim-icon-button" data-shape="square" aria-label="Square brush" title="Square brush">${icon('shape-square')}</button><button class="anim-icon-button" data-shape="round" aria-label="Round brush" title="Round brush">${icon('shape-round')}</button></span>`);
       if (options.includes('opacity')) parts.push(`<label class="anim-option" title="Brush opacity, multiplies the colour's alpha">Opacity<input type="range" data-opacity min="1" max="100" step="1" ${disabled}><output data-opacity-value></output></label>`);
@@ -620,6 +620,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     if (sizeValue) sizeValue.textContent = String(brush.size);
     const typeSelect = host.querySelector('[data-brush-type]');
     if (typeSelect && type) typeSelect.value = type.id;
+    const typeSample = host.querySelector('[data-brush-preview]');
+    if (typeSample && type) { const url = typePreview(type.id);typeSample.hidden = !url;typeSample.style.maskImage = typeSample.style.webkitMaskImage = `url("${url}")`; }
     for (const button of host.querySelectorAll('[data-shape]')) button.setAttribute('aria-pressed', String(button.dataset.shape === brush.shape));
     const opacity = host.querySelector('[data-opacity]');
     if (opacity && opacity !== active) opacity.value = String(Math.round(brush.opacity * 100));
@@ -662,6 +664,28 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     if (next.seed !== undefined) brush.seed = next.seed === null ? null : next.seed >>> 0;
     for (const channel of ['colour', 'alpha']) if (next.modes?.[channel] && VALUE_MODES.includes(next.modes[channel])) brush.modes[channel] = next.modes[channel];
     renderOptions();requestDraw();
+  }
+  // A sample stroke of a brush type as an image URL: a short line drawn with
+  // the real brush on a small frame. It is used as a mask, so only its alpha
+  // counts and it takes the colour of the text around it.
+  const previews = new Map();
+  function typePreview(id) {
+    if (previews.has(id)) return previews.get(id);
+    const w = 40, h = 16, s = surface('image', w, h, new Uint8Array(w * h * 4));
+    const stroke = createStroke(s, {colour: [255, 255, 255, 255], colour2: [255, 255, 255, 255], size: 5, type: id, seed: 7});
+    stroke.gradient = {from: {x: 6, y: 10}, to: {x: 33, y: 5}};
+    strokeLine(stroke, {x: 6, y: 10}, {x: 20, y: 6}, stampBrush);
+    strokeLine(stroke, {x: 20, y: 6}, {x: 33, y: 9}, stampBrush);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;canvas.height = h;
+    let url = '';
+    try {
+      const ctx = canvas.getContext('2d');
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(s.data.buffer), w, h), 0, 0);
+      url = canvas.toDataURL();
+    } catch {}
+    previews.set(id, url);
+    return url;
   }
   function setBrushType(id) {
     const t = tool(), type = BRUSH_TYPES.find(item => item.id === id);

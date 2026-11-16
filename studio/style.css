@@ -27,6 +27,8 @@ select { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .studio-option[aria-selected="true"]::after { content: ''; position: absolute; right: 8px; top: 13px; width: 6px; height: 6px; background: var(--accent); }
 .studio-option:hover, .studio-option.focused { background: var(--menu-hover); outline: none; }
 .studio-option[aria-disabled="true"] { opacity: .4; cursor: default; }
+.studio-option:has(.studio-option-preview) { display: flex; align-items: center; gap: 12px; }
+.studio-option-preview { flex: none; width: 80px; height: 32px; background: currentColor; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; image-rendering: pixelated; }
 body { margin: 0; padding: 12px; background: var(--bg); color: var(--text); overflow: hidden; -webkit-user-select: none; user-select: none; }
 input, textarea, [contenteditable="true"], #terminals, #error { -webkit-user-select: text; user-select: text; }
 button, input, select { font: inherit; }
