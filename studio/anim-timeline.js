@@ -267,16 +267,32 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
 
   // Events ---------------------------------------------------------------------------------
 
+  // While an edge plays, every frame rebuilds the bar, so a button is usually
+  // replaced between press and release and no click reaches it. During
+  // playback a press therefore acts at once and the click that may follow is
+  // dropped. Keyboard clicks (detail 0) always go through.
+  let pressed = false;
+  bar.addEventListener('pointerdown', event => {
+    pressed = false;
+    const button = event.target.closest('button');
+    if (!playing || event.button !== 0 || !button || button.disabled) return;
+    pressed = true;
+    act(button);
+  });
   bar.addEventListener('click', event => {
     const button = event.target.closest('button');
+    if (pressed && event.detail) { pressed = false;return; }
     if (!button || button.disabled) return;
+    act(button);
+  });
+  function act(button) {
     if (button.matches('[data-play]')) togglePlay();
     else if (button.matches('[data-step-frame]')) { stop();select(frame().index + Number(button.dataset.stepFrame)); }
     else if (button.matches('[data-add-frame]')) addAfter();
     else if (button.matches('[data-duplicate-frame]')) duplicate();
     else if (button.matches('[data-delete-frame]')) remove();
     else if (button.matches('[data-onion]')) setOnion({on: !onion.on});
-  });
+  }
   bar.addEventListener('change', event => {
     const input = event.target;
     if (input.matches('[data-fps]')) {
