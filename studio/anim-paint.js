@@ -571,6 +571,69 @@ export function strokeLine(stroke, from, to, stampFn = stamp) {
   });
 }
 
+// Corners in what is drawn ------------------------------------------------------
+//
+// A corner is a pixel vertex where a hard edge turns: of the four half-edges
+// that meet there (left, right, up, down), at least one horizontal and one
+// vertical have a strong contrast between the pixels on their two sides.
+// Contrast is the largest difference of the premultiplied channels and the
+// alpha, so black on white, white on transparent and black on transparent
+// all count fully, and soft gradients do not.
+
+// A pixel as premultiplied [r, g, b, a]. Positions outside the frame read the
+// nearest pixel inside, so the frame's own border is never an edge.
+function inkAt(s, x, y) {
+  x = clamp(x, 0, s.width - 1);y = clamp(y, 0, s.height - 1);
+  const n = CHANNELS[s.format], i = (y * s.width + x) * n, d = s.data;
+  if (n === 4) { const a = d[i + 3] / 255;return [d[i] * a, d[i + 1] * a, d[i + 2] * a, d[i + 3]]; }
+  if (n === 2) { const g = d[i] * d[i + 1] / 255;return [g, g, g, d[i + 1]]; }
+  return [d[i], d[i], d[i], 255];
+}
+const contrastOf = (p, q) => Math.max(Math.abs(p[0] - q[0]), Math.abs(p[1] - q[1]), Math.abs(p[2] - q[2]), Math.abs(p[3] - q[3])) / 255;
+const CORNER_REACH = 8;
+// The corner nearest to (fx, fy) within `radius` pixels, as {x, y, score}
+// with x and y on pixel edges (0 is the left side of pixel 0), or null.
+//
+// The score is the contrast at the corner, raised by how far the two edges
+// run straight from it and lowered by the distance from (fx, fy). A real
+// corner of a shape has long straight edges; the steps of a rounded corner or
+// of a diagonal line have edges of one or two pixels, so they lose against a
+// real corner nearby but are still found when nothing better is around.
+export function findCorner(s, fx, fy, radius, threshold = 0.3) {
+  const {width, height} = s;
+  // How far the hard edge runs from vertex (x, y) in one direction, and its
+  // contrast at the vertex. (ax, ay) and (bx, by) are the two pixels across
+  // the edge at the vertex, (sx, sy) the step along it.
+  const arm = (ax, ay, bx, by, sx, sy) => {
+    let length = 0, first = 0;
+    for (let i = 0; i < CORNER_REACH; i++) {
+      const px = ax + sx * i, py = ay + sy * i, qx = bx + sx * i, qy = by + sy * i;
+      if (px < 0 || py < 0 || qx < 0 || qy < 0 || px >= width || py >= height || qx >= width || qy >= height) break;
+      const c = contrastOf(inkAt(s, px, py), inkAt(s, qx, qy));
+      if (c <= threshold) break;
+      if (!i) first = c;
+      length++;
+    }
+    return {length, first};
+  };
+  let best = null;
+  for (let y = Math.max(1, Math.ceil(fy - radius)); y <= Math.min(height - 1, Math.floor(fy + radius)); y++) {
+    for (let x = Math.max(1, Math.ceil(fx - radius)); x <= Math.min(width - 1, Math.floor(fx + radius)); x++) {
+      const distance = Math.hypot(x - fx, y - fy);
+      if (distance > radius) continue;
+      const right = arm(x, y - 1, x, y, 1, 0), left = arm(x - 1, y - 1, x - 1, y, -1, 0);
+      const down = arm(x - 1, y, x, y, 0, 1), up = arm(x - 1, y - 1, x, y - 1, 0, -1);
+      const h = right.length >= left.length ? right : left, v = down.length >= up.length ? down : up;
+      if (!h.length || !v.length) continue;
+      // An edge that only crosses another one straight is not a corner of either.
+      const sharp = Math.min(h.length, v.length, 6) / 6;
+      const score = Math.min(h.first, v.first) * (0.35 + 0.65 * sharp) * (1 - 0.6 * distance / radius);
+      if (!best || score > best.score) best = {x, y, score};
+    }
+  }
+  return best;
+}
+
 // A filled rectangle between two corners, both included. Like the asset
 // editor's drawSquare it ignores the brush size.
 export function strokeRect(stroke, from, to) {

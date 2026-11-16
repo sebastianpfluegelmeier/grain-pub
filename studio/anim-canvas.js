@@ -5,7 +5,7 @@
 // step per stroke, so a stroke is painted into the frame as the pointer moves
 // and recorded at pointer up with the copy taken at pointer down.
 
-import {surface, createStroke, resetStroke, stamp, stampBrush, BRUSH_TYPES, brushType, stampBlur, stampDisplace, strokeLine, strokeRect,
+import {surface, createStroke, resetStroke, stamp, stampBrush, BRUSH_TYPES, brushType, findCorner, stampBlur, stampDisplace, strokeLine, strokeRect,
   drawGradient, floodFill, pick, rectFrom, clipRect, copyRect, clearRect, paste, moveRect, shift, flip, rotate, canRotate, toRGBA, addGhost,
   footprint, inside, paintTargets, MIN_BRUSH, MAX_BRUSH, VALUE_MODES, TWEEN_MODES, toHex, decodeValue} from './anim-paint.js';
 import {createColourPicker} from './anim-colour.js';
@@ -103,7 +103,8 @@ const GUIDES_KEY = 'studio-anim-guides', GRID_STEP_MIN = 2, GRID_STEP_MAX = 512;
 export function normalizeGuides(source) {
   const input = source && typeof source === 'object' ? source : {};
   const step = value => clamp(Math.round(Number(value)) || 8, GRID_STEP_MIN, GRID_STEP_MAX);
-  return {grid: input.grid === true, gridW: step(input.gridW), gridH: step(input.gridH), centre: input.centre === true, snap: input.snap === true};
+  return {grid: input.grid === true, gridW: step(input.gridW), gridH: step(input.gridH), centre: input.centre === true, snap: input.snap === true,
+    corners: input.corners === true};
 }
 // Snapping works per axis on pixel edges: edge 0 is the left side of pixel 0,
 // edge `size` the right side of the last pixel. The targets are the grid
@@ -158,6 +159,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
         <span class="anim-grid-step"><input type="number" data-grid-step="gridW" min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid width in pixels" title="Grid width in pixels"><span aria-hidden="true">×</span><input type="number" data-grid-step="gridH" min="${GRID_STEP_MIN}" max="${GRID_STEP_MAX}" step="1" inputmode="numeric" aria-label="Grid height in pixels" title="Grid height in pixels"></span>
         <button data-guide="centre" aria-pressed="false" aria-label="Centre lines" title="Show the centre lines">${icon('centre-lines')}</button>
         <button data-guide="snap" aria-pressed="false" aria-label="Snap line, rectangle and gradient" title="Snap line, rectangle and gradient to the grid, the sides and the centre lines">${icon('magnet')}</button>
+        <button data-guide="corners" aria-pressed="false" aria-label="Snap to drawn corners" title="Snap line, rectangle and gradient to the corners of what is drawn">${icon('corner-snap')}</button>
       </div>
     </div>
     <div class="anim-options" data-options></div>
@@ -718,27 +720,66 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   function setGuides(patch) {
     guides = normalizeGuides({...guides, ...patch});
     try { storage?.setItem(GUIDES_KEY, JSON.stringify(guides)); } catch {}
-    if (!guides.snap) snapMark = null;
+    if (!guides.snap && !guides.corners) snapMark = null;
     renderChrome();requestDraw();
   }
-  const snapActive = () => guides.snap && tool().kind === 'drag' && editable();
+  const snapActive = () => (guides.snap || guides.corners) && tool().kind === 'drag' && editable();
+  // The drawn corner near the pointer, when corner snapping is on. During a
+  // drag it is looked for in the frame from before the drag, so the shape
+  // being drawn does not catch itself. The reach is a fixed distance on
+  // screen, so it does not grow when zoomed out.
+  function cornerNear(p) {
+    const d = doc();
+    if (!guides.corners || !d) return null;
+    const data = gesture?.type === 'drag' ? gesture.entries[0]?.base : d.pixels.get(frameId());
+    return data ? findCorner(surface(d.format, d.width, d.height, data), p.fx, p.fy, clamp(14 / view.k, 1.5, 12)) : null;
+  }
+  // One axis of a rectangle between its first corner and the pointer, as the
+  // first and last pixel. Each end is a pixel edge when it is snapped
+  // (`anchorEdge`, `mark`) and a pixel otherwise (`anchorCell`, `cell`).
+  function rectSpan(anchorEdge, anchorCell, mark, cell) {
+    if (anchorEdge !== null) {
+      if (mark !== null && mark !== anchorEdge) return mark > anchorEdge ? [anchorEdge, mark - 1] : [mark, anchorEdge - 1];
+      return cell >= anchorEdge ? [anchorEdge, cell] : [cell, anchorEdge - 1];
+    }
+    if (mark !== null) return mark > anchorCell ? [anchorCell, Math.max(anchorCell, mark - 1)] : [Math.min(mark, anchorCell), anchorCell];
+    return [Math.min(anchorCell, cell), Math.max(anchorCell, cell)];
+  }
   // The two ends of a shape for the pointer at `p`, and the snap marker.
   // `start` is the result from the press: a line and a gradient keep their
-  // first pixel, a snapped rectangle keeps its first corner, an edge.
+  // first pixel, a rectangle keeps its first corner. A drawn corner near the
+  // pointer wins over the grid.
   function shapeEnds(p, start) {
     const d = doc();
     if (!snapActive()) { const point = {x: p.x, y: p.y};return {from: start?.from ?? point, to: point, mark: null}; }
+    const found = cornerNear(p);
     if (tool().id === 'rectangle') {
       const edgesX = snapEdges(d.width, guides.gridW, guides.centre), edgesY = snapEdges(d.height, guides.gridH, guides.centre);
-      const corner = start?.corner ?? {x: nearest(edgesX, p.fx), y: nearest(edgesY, p.fy)};
+      // The first corner: {x, y} on pixel edges when snapped, else the pixel under the pointer.
+      const anchor = start?.anchor ?? (found ? {edge: {x: found.x, y: found.y}} : guides.snap ? {edge: {x: nearest(edgesX, p.fx), y: nearest(edgesY, p.fy)}} : {cell: {x: p.x, y: p.y}});
       // Before the press the marker shows where the first corner would go.
-      if (!start && !gesture && !p.pressed) return {corner, from: null, to: null, mark: corner};
-      const sx = snapSpan(corner.x, p.fx, edgesX), sy = snapSpan(corner.y, p.fy, edgesY);
-      return {corner, from: {x: sx.from, y: sy.from}, to: {x: sx.to, y: sy.to}, mark: {x: sx.mark, y: sy.mark}};
+      if (!start && !p.pressed) return {anchor, from: null, to: null, mark: anchor.edge ?? null};
+      const axis = (key, position, cell, edges) => {
+        const edge = anchor.edge ? anchor.edge[key] : null;
+        let mark = found && found[key] !== edge ? found[key] : null;
+        if (mark === null && guides.snap && edge !== null) mark = snapSpan(edge, position, edges).mark;
+        const [lo, hi] = rectSpan(edge, anchor.cell ? anchor.cell[key] : null, mark, cell);
+        return {lo, hi, mark};
+      };
+      const ax = axis('x', p.fx, p.x, edgesX), ay = axis('y', p.fy, p.y, edgesY);
+      const mark = ax.mark === null && ay.mark === null ? null : {x: ax.mark ?? Math.round(p.fx), y: ay.mark ?? Math.round(p.fy)};
+      return {anchor, from: {x: ax.lo, y: ay.lo}, to: {x: ax.hi, y: ay.hi}, mark};
     }
-    const sx = snapPixel(p.fx, d.width, guides.gridW, guides.centre), sy = snapPixel(p.fy, d.height, guides.gridH, guides.centre);
-    const point = {x: sx.pixel, y: sy.pixel};
-    return {from: start?.from ?? point, to: point, mark: {x: sx.mark, y: sy.mark}};
+    let point = {x: p.x, y: p.y}, mark = null;
+    if (found) {
+      // Of the four pixels at the corner, the one on the pointer's side.
+      point = {x: clamp(p.fx >= found.x ? found.x : found.x - 1, 0, d.width - 1), y: clamp(p.fy >= found.y ? found.y : found.y - 1, 0, d.height - 1)};
+      mark = {x: found.x, y: found.y};
+    } else if (guides.snap) {
+      const sx = snapPixel(p.fx, d.width, guides.gridW, guides.centre), sy = snapPixel(p.fy, d.height, guides.gridH, guides.centre);
+      point = {x: sx.pixel, y: sy.pixel};mark = {x: sx.mark, y: sy.mark};
+    }
+    return {from: start?.from ?? point, to: point, mark};
   }
   const brushSize = () => brush.size;
   // Pen pressure changes size or opacity when the brush asks for it; a mouse

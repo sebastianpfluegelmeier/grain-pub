@@ -60,6 +60,7 @@ const icons = {
   "centre-lines": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"64\" y=\"64\" width=\"128\" height=\"128\" opacity=\".4\"/><path d=\"M128 24v208M24 128h208\"/></g>",
   "magnet": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M56 40v88a72 72 0 0 0 144 0V40h-44v88a28 28 0 0 1-56 0V40z\"/><path d=\"M56 80h44M156 80h44\"/></g>",
   "tidy": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"96\" y=\"36\" width=\"64\" height=\"48\"/><rect x=\"32\" y=\"172\" width=\"64\" height=\"48\"/><rect x=\"160\" y=\"172\" width=\"64\" height=\"48\"/><path d=\"M128 84v44M64 172v-44h128v44\"/></g>",
+  "corner-snap": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M56 216V88h144\"/><circle cx=\"56\" cy=\"88\" r=\"28\" fill=\"currentColor\" fill-opacity=\".3\"/></g>",
   "list": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\" stroke-linecap=\"round\"><path d=\"M40 64h176M40 128h176M40 192h176\"/></g>",
   "shape-square": "<rect x=\"68\" y=\"68\" width=\"120\" height=\"120\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\"/>",
   "shape-round": "<circle cx=\"128\" cy=\"128\" r=\"64\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"12\"/>",
