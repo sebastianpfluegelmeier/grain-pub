@@ -20,10 +20,16 @@ function openMenu(select) {
   menu.setAttribute('aria-label',select.getAttribute('aria-label') || ([...select.labels || []].map(label=>[...label.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent).join('').trim()).join(' ')) || 'Options');
   const options=[...select.options], items=[];
   let current=Math.max(0,select.selectedIndex), search='', searchTime=0;
+  // The option is brought into view by scrolling the menu itself.
+  // scrollIntoView would also scroll the page where it can, and a scrolling
+  // page closes the menu.
   const focus=index=>{
     if(index<0 || index>=items.length || options[index].disabled)return;
     current=index;items.forEach((item,i)=>item.classList.toggle('focused',i===index));
-    items[index].focus({preventScroll:true});items[index].scrollIntoView({block:'nearest'});
+    const item=items[index];
+    item.focus({preventScroll:true});
+    if(item.offsetTop<menu.scrollTop)menu.scrollTop=item.offsetTop;
+    else if(item.offsetTop+item.offsetHeight>menu.scrollTop+menu.clientHeight)menu.scrollTop=item.offsetTop+item.offsetHeight-menu.clientHeight;
   };
   const choose=index=>{
     if(options[index].disabled)return;
@@ -72,24 +78,45 @@ function openMenu(select) {
   menu.style.top=(downward?rect.bottom+3:Math.max(margin,rect.top-menu.offsetHeight-3))+'px';
   focus(options[current]?.disabled?options.findIndex(option=>!option.disabled):current);
 }
+// The native select never gets a press: pointer events pass through it, and
+// the press is matched to the select by its place on the page. Cancelling a
+// press on the select itself is not enough to keep the browser's own list
+// closed; Firefox and Safari on a touch screen open it regardless.
+const passThrough=document.createElement('style');
+passThrough.textContent='select:not([multiple]){pointer-events:none}label:has(select:not([multiple]):not(:disabled)){cursor:pointer}';
+document.head.append(passThrough);
+function selectAt(event) {
+  const target=event.target;
+  if(!(target instanceof Element) || active?.menu.contains(target))return null;
+  const direct=target.closest('select');
+  if(direct)return direct.multiple?null:direct;
+  // Only what lies under the press counts: the pressed element holds the
+  // select, as its label or the row around it does.
+  for(const select of document.querySelectorAll('select:not([multiple])')){
+    if(!target.contains(select))continue;
+    const rect=select.getBoundingClientRect();
+    if(rect.width>0 && event.clientX>=rect.left && event.clientX<=rect.right && event.clientY>=rect.top && event.clientY<=rect.bottom)return select;
+  }
+  // A press on the text of a label opens the select the label belongs to.
+  const label=target.closest('label');
+  const labelled=label && !target.closest('input,button,textarea,a')?label.querySelector('select:not([multiple])'):null;
+  return labelled && label.querySelectorAll('input,button,textarea').length===0?labelled:null;
+}
 document.addEventListener('pointerdown',event=>{
-  const select=event.target.closest('select');
-  if(select && !select.multiple){
+  if(event.button>0)return;
+  const select=selectAt(event);
+  if(select){
     byTouch=event.pointerType==='touch' || event.pointerType==='pen';
-    event.preventDefault();if(!byTouch)select.focus({preventScroll:true});openMenu(select);
+    event.preventDefault();
+    if(select.disabled)return;
+    if(!byTouch)select.focus({preventScroll:true});
+    openMenu(select);
   }
   else if(active && !active.menu.contains(event.target))closeMenu();
 },true);
-document.addEventListener('click',event=>{if(event.target.closest('select'))event.preventDefault();},true);
-// Browsers that still send the mouse press after a cancelled pointer press
-// would open their own list on it.
-document.addEventListener('mousedown',event=>{if(event.target.closest?.('select:not([multiple])'))event.preventDefault();},true);
-// Cancelling a pointer event does not stop what a touch does by default; only
-// cancelling the touch itself keeps the system picker closed. The listeners
-// must not be passive for that.
-for(const type of ['touchstart','touchend'])document.addEventListener(type,event=>{
-  if(event.target.closest?.('select:not([multiple])') && event.cancelable)event.preventDefault();
-},{capture:true,passive:false});
+// A click on a label would hand the focus to its select, which opens the
+// system picker on a touch screen.
+for(const type of ['mousedown','click'])document.addEventListener(type,event=>{if(selectAt(event))event.preventDefault();},true);
 // Some systems still open the picker when a select takes focus by other means.
 document.addEventListener('focusin',event=>{if(byTouch && active && event.target===active.select)event.target.blur();},true);
 document.addEventListener('keydown',event=>{
@@ -98,7 +125,14 @@ document.addEventListener('keydown',event=>{
     event.preventDefault();event.stopPropagation();openMenu(event.target);
   }
 },true);
-document.addEventListener('scroll',event=>{if(active && !active.menu.contains(event.target))closeMenu();},true);
-window.addEventListener('resize',()=>closeMenu());
-window.addEventListener('blur',()=>closeMenu());
+// The menu closes when something that holds its select scrolls, because the
+// select then moves away from it. Other scrolling leaves it open: a touch
+// screen reports small page scrolls of its own while a menu is used.
+document.addEventListener('scroll',event=>{
+  if(active && event.target!==document && event.target.contains?.(active.select))closeMenu();
+},true);
+// A touch screen also reports resizes and lost focus for its own reasons
+// (the keyboard, the toolbar, handwriting), so only a mouse session closes on them.
+window.addEventListener('resize',()=>{if(!byTouch)closeMenu();});
+window.addEventListener('blur',()=>{if(!byTouch)closeMenu();});
 new MutationObserver(()=>{if(active && !active.select.isConnected)closeMenu();}).observe(document.body,{childList:true,subtree:true});
