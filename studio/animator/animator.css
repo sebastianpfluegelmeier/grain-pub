@@ -8,6 +8,9 @@
    (pan-x pan-y leaves only scrolling); the canvas and the graph handle their
    own gestures with touch-action: none. */
 html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+/* The visible height of the screen. Opened from the home screen, iOS makes a
+   page of height 100% end above the bottom edge of the display. */
+@supports (height: 100dvh) { html, body { height: 100dvh; } }
 html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; }
 body.animator {
   display: flex; flex-direction: column;
@@ -45,7 +48,7 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
 .animator-sync-dialog .field-error:empty { display: none; }
 .animator-sync-dialog .dialog-actions { margin-top: 16px; }
 
-.animator-main { flex: 1; min-height: 0; height: auto; padding: 0 0 12px; }
+.animator-main { flex: 1; min-height: 0; height: auto; padding: 0 0 4px; }
 .animator-main #error { left: 0; bottom: 24px; }
 
 .animator-note { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 12px 4px; border-top: 1px dotted var(--line); }
