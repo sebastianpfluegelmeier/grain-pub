@@ -708,7 +708,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       session.select({kind: 'node', id});
       if (editable()) gesture = {type: 'move', pointerId: event.pointerId, id, origin: p, start: {x: node.x, y: node.y}, position: {x: node.x, y: node.y}, moved: false, slop};
     } else if (edgeElement) {
-      session.select({kind: 'edge', id: Number(edgeElement.dataset.edge)});
+      session.select({kind: 'edge', id: edgeAt(event, edgeElement)});
     } else gesture = pan(true);
     // Refitting while a state or an edge is dragged would move the drawing under the pointer.
     if (gesture && gesture.type !== 'pan') autoFit = false;
@@ -750,6 +750,18 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     }
     render();
   });
+  // The edge a press on `element` selects. Edges of a bundle lie on each
+  // other where they share a line; a press there on the selected edge moves
+  // on to the next one, so repeated presses go through all of them. A frame
+  // count belongs to one edge and always selects that one.
+  function edgeAt(event, element) {
+    const id = Number(element.dataset.edge), selected = selection();
+    if (!event.target.matches?.('.anim-edge-hit') || selected?.kind !== 'edge') return id;
+    const under = document.elementsFromPoint?.(event.clientX, event.clientY) ?? [];
+    const ids = [...new Set(under.map(item => item.closest?.('[data-edge]')).filter(Boolean).map(item => Number(item.dataset.edge)))].sort((a, b) => a - b);
+    const index = ids.indexOf(selected.id);
+    return index < 0 ? id : ids[(index + 1) % ids.length];
+  }
   function finish(event) {
     touches.delete(event.pointerId);
     if (!touches.size) beforeTouch = null;
