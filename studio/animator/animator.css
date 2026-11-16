@@ -78,7 +78,7 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
     position: relative;
     --anim-graph-row: minmax(160px, var(--anim-graph-height, 26%)); --anim-graph-row-gap: 20px;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(240px, 1fr) 20px minmax(112px, var(--anim-timeline-height, 168px)) var(--anim-graph-row-gap) var(--anim-graph-row);
+    grid-template-rows: minmax(240px, 1fr) 8px auto var(--anim-graph-row-gap) var(--anim-graph-row);
   }
   #animation-view.anim-graph-hidden { --anim-graph-row: 0px; --anim-graph-row-gap: 0px; }
   /* Below the row with its own toggle, which must stay reachable to close it. */
@@ -86,7 +86,6 @@ body.animator :is(button, label, h2, h3, p, span) { -webkit-touch-callout: none;
   /* With nothing open there is no toggle and nothing to cover. */
   #animation-view:not(.anim-list-hidden):not(:has(.anim-document-title)) .anim-list { top: 0; }
   #animation-view .anim-canvas-area { grid-column: 1; grid-row: 1; }
-  #animation-view .anim-divider[data-resize="timeline"] { grid-column: 1; grid-row: 2; }
   #animation-view .anim-timeline { grid-column: 1; grid-row: 3; }
   /* The graph's border lies flat here and sets the graph's height. */
   #animation-view .anim-divider[data-resize="graph"] { grid-column: 1; grid-row: 4; width: auto; height: 20px; cursor: row-resize; border-top: 1px dotted var(--line); }

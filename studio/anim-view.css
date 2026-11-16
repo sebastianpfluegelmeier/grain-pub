@@ -7,7 +7,7 @@
   --anim-list-column: minmax(160px, var(--anim-list-width, 192px)); --anim-list-gap: 24px;
   --anim-graph-column: minmax(220px, var(--anim-graph-width, 32%)); --anim-graph-gap: 24px; --anim-canvas-min: 240px;
   grid-template-columns: var(--anim-list-column) var(--anim-list-gap) minmax(var(--anim-canvas-min), 1fr) var(--anim-graph-gap) var(--anim-graph-column);
-  grid-template-rows: minmax(160px, 1fr) 16px minmax(96px, var(--anim-timeline-height, 168px));
+  grid-template-rows: minmax(160px, 1fr) 8px auto;
 }
 /* Panels hidden with the toggles of a collapsible view (small screens). */
 #animation-view.anim-list-hidden { --anim-list-column: 0px; --anim-list-gap: 0px; }
@@ -74,7 +74,6 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 /* A fixed share, so selecting something never resizes the graph under the pointer. */
 .anim-details { flex: 0 0 clamp(176px, 42%, 304px); overflow: auto; padding: 12px 0 0; border-top: 1px dotted var(--line); }
 .anim-details:empty { display: none; }
-.anim-divider[data-resize="timeline"] { grid-column: 1 / -1; grid-row: 2; }
 .anim-timeline { grid-column: 1 / -1; grid-row: 3; display: flex; flex-direction: column; }
 
 /* Icon buttons: a symbol, with the action in the tooltip and the accessible
@@ -308,18 +307,18 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-onion button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
 .anim-onion-choice { flex-direction: row; align-items: center; gap: 8px; font-size: 11px; white-space: nowrap; }
 .anim-onion-choice select { max-width: 200px; padding: 4px 20px 4px 2px; font-size: 12px; }
-.anim-strip { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 12px 2px 8px; }
+.anim-strip { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 6px 2px 4px; }
 .anim-strip[hidden] { display: none; }
 .anim-strip:focus { outline: none; }
 .anim-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* A finger scrolls the strip; holding a frame still picks it up (anim-timeline.js). */
-.anim-thumb { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 3px; border: 1px solid transparent; cursor: pointer; touch-action: pan-x; }
+.anim-thumb { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border: 1px solid transparent; cursor: pointer; touch-action: pan-x; }
 .anim-thumb:hover { border-color: var(--line); }
 .anim-thumb[aria-selected="true"] { border-color: var(--accent); }
 .anim-thumb.dragging { opacity: 0.5; }
 .anim-thumb.drop-before { box-shadow: -4px 0 0 -1px var(--accent); }
 .anim-thumb.drop-after { box-shadow: 4px 0 0 -1px var(--accent); }
-.anim-thumb-image { display: block; height: 64px; max-width: 128px; min-width: 16px; }
+.anim-thumb-image { display: block; height: 48px; max-width: 96px; min-width: 16px; }
 .anim-thumb-image canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; object-fit: contain; }
 .anim-thumb-number { color: var(--muted); font: 10px var(--mono); }
 .anim-timeline-empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
@@ -350,7 +349,6 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
    hit areas in the graph and larger slider thumbs. Fine pointers keep the
    sizes above. */
 @media (pointer: coarse) {
-  #animation-view { grid-template-rows: minmax(160px, 1fr) 20px minmax(112px, var(--anim-timeline-height, 168px)); }
   .anim-list-header, .anim-graph-toolbar, .anim-document, .anim-timeline-bar { min-height: 44px; height: auto; }
   .anim-list-header h2, .anim-document-title h2, .anim-timeline-title { font-size: 15px; }
   .anim-document-title { line-height: 44px; }
@@ -362,6 +360,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-tools button { width: 40px; height: 40px; padding: 10px; }
   .anim-grid-step input { width: 48px; min-height: 40px; font-size: 16px; }
   .anim-stepper button, .anim-tools .anim-stepper button { width: 36px; height: 40px; padding: 9px; }
+  /* Tighter, so the bar stays on one row on a portrait tablet. */
+  .anim-timeline-bar { gap: 0 10px; }
   .anim-position:empty { display: none; }
   .anim-colour-head { flex-wrap: wrap; }
   .anim-hex { flex-basis: 100%; }

@@ -47,7 +47,6 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       <div id="anim-graph" class="anim-region"></div>
       <div id="anim-details" class="anim-details"></div>
     </section>
-    <div class="vertical-divider anim-divider" data-resize="timeline" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="Resize frame timeline"></div>
     <section id="anim-timeline" class="anim-region anim-timeline" aria-label="Frame timeline"></section>
     <dialog class="anim-dialog" data-new-dialog>
       <form method="dialog" data-new-form>
@@ -604,7 +603,8 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
 
   // Draggable borders, as in the workspace dividers. Sizes are kept per browser.
   // Each is [custom property, smallest size, room left for the rest].
-  const sizes = {graph: ['--anim-graph-width', 220, 480], graphHeight: ['--anim-graph-height', 140, 420], timeline: ['--anim-timeline-height', 96, 200]};
+  // The frame timeline has no border to drag: it is as tall as its one row of frames.
+  const sizes = {graph: ['--anim-graph-width', 220, 480], graphHeight: ['--anim-graph-height', 140, 420]};
   function setSize(kind, value) {
     const [property, minimum, rest] = sizes[kind], box = parent.getBoundingClientRect();
     const maximum = (kind === 'graph' ? box.width : box.height) - rest;
@@ -619,19 +619,15 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     // A stacked layout (portrait) puts the graph below the frames; its border
     // then lies flat and sets the graph's height instead of its width.
     const target = () => {
-      if (handle.dataset.resize !== 'graph') return 'timeline';
       const rect = handle.getBoundingClientRect();
       return rect.width > rect.height ? 'graphHeight' : 'graph';
     };
-    const measure = kind => kind === 'timeline' ? regions.timeline.getBoundingClientRect().height
-      : $('.anim-graph-area').getBoundingClientRect()[kind === 'graph' ? 'width' : 'height'];
+    const measure = kind => $('.anim-graph-area').getBoundingClientRect()[kind === 'graph' ? 'width' : 'height'];
     handle.onpointerdown = event => {
       if (event.button !== 0) return;
       event.preventDefault();
       const kind = target(), box = parent.getBoundingClientRect();
-      // The frames do not reach the view's bottom edge in a stacked layout.
-      const timelineBottom = regions.timeline.getBoundingClientRect().bottom;
-      const move = e => setSize(kind, kind === 'graph' ? box.right - e.clientX : kind === 'graphHeight' ? box.bottom - e.clientY : timelineBottom - e.clientY);
+      const move = e => setSize(kind, kind === 'graph' ? box.right - e.clientX : box.bottom - e.clientY);
       const end = () => { document.removeEventListener('pointermove', move);document.removeEventListener('pointerup', end);document.removeEventListener('pointercancel', end); };
       document.addEventListener('pointermove', move);document.addEventListener('pointerup', end);document.addEventListener('pointercancel', end);
     };
