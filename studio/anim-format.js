@@ -16,7 +16,7 @@ export const MAX_EDGE_FRAMES = 1024;
 export const MAX_NAME_LEN = 64;
 export const FORMAT_BYTES = {field: 1, matte: 2, image: 4};
 const FORMAT_NAMES = {1: 'field', 2: 'matte', 4: 'image'};
-const NAME_PATTERN = /^[A-Za-z0-9 _-]+$/;
+const NAME_PATTERN = /^[A-Za-z0-9 _-]*$/;
 
 const fail = message => { throw new Error(message); };
 // Any integral number is accepted, so 12 and 12.0 read the same here and in
@@ -24,8 +24,9 @@ const fail = message => { throw new Error(message); };
 const integerIn = (value, min, max) => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+// A name is optional: the empty string is a node without one.
 export function validNodeName(name) {
-  return typeof name === 'string' && name.length >= 1 && name.length <= MAX_NAME_LEN
+  return typeof name === 'string' && name.length <= MAX_NAME_LEN
     && NAME_PATTERN.test(name) && !name.startsWith(' ') && !name.endsWith(' ');
 }
 
@@ -95,7 +96,7 @@ export function validateMetadata(meta, frameCount) {
   for (const node of meta.nodes) {
     if (!validNodeName(node.name)) fail(`animation node name \`${node.name}\` is not allowed`);
     if (ids.has(node.id)) fail(`animation node id ${node.id} is used twice`);
-    if (names.has(node.name)) fail(`animation node name \`${node.name}\` is used twice`);
+    if (node.name !== '' && names.has(node.name)) fail(`animation node name \`${node.name}\` is used twice`);
     ids.add(node.id); names.add(node.name);
   }
   const edgeIds = new Set();

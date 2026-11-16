@@ -6,7 +6,7 @@
 // inputs and time and shows the result in the graph and the canvas.
 
 import {buildGraph, createMachineState, tick, structureHash, distance, MAX_RATE} from './anim-machine.js';
-import {nodeById} from './anim-model.js';
+import {nodeById, nodeLabel} from './anim-model.js';
 import {icon} from './icons.js';
 
 // The defaults of the animation_graph call (section 2.2).
@@ -247,7 +247,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   // heading. Names are wrapped so they keep their case.
   function describe() {
     const d = doc(), g = player.graph, state = player.state;
-    const name = index => `<span class="anim-name">${text(g.nodes[index].name)}</span>`;
+    const name = index => `<span class="anim-name">${text(nodeLabel(g.nodes[index]))}</span>`;
     if (!d.nodes.length) return {where: 'This animation has no states yet. Add one to preview it.', heading: ''};
     const position = state.position;
     if (position.kind === 'unplaced') {
@@ -310,7 +310,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     const machineRequest = player.state.request;
     const state = (requested !== null && nodeById(d, requested)) || (machineRequest !== null ? player.graph.nodes[machineRequest] : null);
     if (!state) return null;
-    const inputs = player.inputs, args = [JSON.stringify(path), `state: ${JSON.stringify(state.name)}`];
+    const inputs = player.inputs, args = [JSON.stringify(path), `state: ${state.name ? JSON.stringify(state.name) : state.id}`];
     if (inputs.urgency !== CALL_DEFAULTS.urgency) args.push(`urgency: ${literal(inputs.urgency)}`);
     if (inputs.rate !== CALL_DEFAULTS.rate) args.push(`rate: ${literal(inputs.rate)}`);
     if (inputs.loop !== CALL_DEFAULTS.loop) args.push(`loop: ${inputs.loop}`);

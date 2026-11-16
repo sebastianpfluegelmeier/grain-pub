@@ -124,7 +124,8 @@ const isLoop = (graph, edge) => graph.edgeEnds[edge][0] === graph.edgeEnds[edge]
 // from zero, matching Rust's f64::round, and must match a node id.
 function resolve(graph, request) {
   if (typeof request === 'string') {
-    const index = graph.nodes.findIndex(node => node.name === request);
+    // The empty string is no name, so it never matches an unnamed state.
+    const index = request === '' ? -1 : graph.nodes.findIndex(node => node.name === request);
     return index < 0 ? null : index;
   }
   if (typeof request !== 'number' || !Number.isFinite(request)) return null;

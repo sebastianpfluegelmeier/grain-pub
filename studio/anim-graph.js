@@ -6,7 +6,7 @@
 // frame timeline can follow the selected edge.
 
 import {icon} from './icons.js';
-import {addNode, renameNode, moveNode, deleteNode, addEdge, reverseEdge, setBidirectional, setCancelable,
+import {nodeLabel, addNode, renameNode, moveNode, deleteNode, addEdge, reverseEdge, setBidirectional, setCancelable,
   duplicateEdge, deleteEdge, graphWarnings, nodeById, edgeById, loopsOf, edgesOf, isLoop} from './anim-model.js';
 
 // States are drawn like patcher objects: a box with inlets along its top
@@ -56,6 +56,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       <defs>
         <marker id="${uid}-arrow" class="anim-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z"/></marker>
         <marker id="${uid}-arrow-active" class="anim-arrow active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z"/></marker>
+        <marker id="${uid}-arrow-linked" class="anim-arrow linked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 1L9 5L0 9z"/></marker>
       </defs>
       <g data-viewport></g>
       <text class="anim-graph-measure" aria-hidden="true" x="-10000" y="-10000"></text>
@@ -368,16 +369,21 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     // The selection is kept through the preview but not drawn, because its
     // accent colour would read as the playing edge.
     const isSelected = (kind, id) => !preview && selected?.kind === kind && selected.id === id;
-    const name = id => nodeById(d, id)?.name ?? '';
+    const name = id => nodeLabel(nodeById(d, id));
     let markup = '';
     // The selected and the playing edge are drawn last, on top of the lines
     // they share with others.
-    const front = shape => Number(isSelected('edge', shape.edge.id) || highlight?.edge === shape.edge.id);
+    // With a state selected, the edges that start or end at it stand out and
+    // the rest step back, which shows what the state is connected to.
+    const hub = !preview && selected?.kind === 'node' ? selected.id : null;
+    const linked = edge => hub !== null && (edge.from === hub || edge.to === hub);
+    const front = shape => 2 * Number(isSelected('edge', shape.edge.id) || highlight?.edge === shape.edge.id) + Number(linked(shape.edge));
     for (const {edge, d: path, label, loop, dash} of [...shapes].sort((a, b) => front(a) - front(b))) {
       const playing = highlight?.edge === edge.id, reversed = playing && Boolean(highlight.reversed);
       const both = !loop && edge.bidirectional;
-      const classes = ['anim-edge', edge.cancelable && 'cancelable', isSelected('edge', edge.id) && 'selected', playing && 'playing', reversed && 'reversed'].filter(Boolean).join(' ');
-      const arrow = on => `url(#${uid}-arrow${on ? '-active' : ''})`;
+      const classes = ['anim-edge', edge.cancelable && 'cancelable', isSelected('edge', edge.id) && 'selected', playing && 'playing', reversed && 'reversed',
+        hub !== null && (linked(edge) ? 'linked' : 'unlinked')].filter(Boolean).join(' ');
+      const arrow = on => `url(#${uid}-arrow${on ? '-active' : linked(edge) ? '-linked' : ''})`;
       // A played bidirectional edge lights only the arrowhead it travels
       // towards, so its direction shows.
       const endMarker = arrow(isSelected('edge', edge.id) || (playing && !reversed));
@@ -401,7 +407,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         highlight?.node === node.id && 'current', highlight?.requested === node.id && 'requested'].filter(Boolean).join(' ');
       const left = b.x - b.hw, top = b.y - b.hh, bottom = b.y + b.hh;
       const ports = (count, y) => Array.from({length: count}, (_, index) => `<rect class="anim-port" x="${left + index * PORT_STEP}" y="${y}" width="${PORT_WIDTH}" height="${PORT_HEIGHT}"/>`).join('');
-      markup += `<g class="${classes}" data-node="${node.id}" role="button" aria-label="${text(`State ${node.name}, id ${node.id}`)}">
+      markup += `<g class="${classes}" data-node="${node.id}" role="button" aria-label="${text(node.name ? `State ${node.name}, id ${node.id}` : `State ${node.id}, no name`)}">
         <rect class="anim-node-box" x="${left}" y="${top}" width="${b.hw * 2}" height="${b.hh * 2}"/>
         ${ports(inCount.get(node.id), top)}${ports(outs.get(node.id).length, bottom - PORT_HEIGHT)}
         <text class="anim-node-name" x="${left + NODE_PAD}" y="${b.y + 4}">${text(node.name)}</text>
@@ -411,7 +417,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         // The open outlet: the next free slot on the bottom edge. The larger
         // transparent shape around it is what the pointer grabs.
         const open = outlet(node.id, outs.get(node.id).length);
-        markup += `<g class="anim-handle" data-handle="${node.id}"><title>${text(`Drag to add an edge from ${node.name}`)}</title>
+        markup += `<g class="anim-handle" data-handle="${node.id}"><title>${text(`Drag to add an edge from ${nodeLabel(node)}`)}</title>
           <rect class="anim-handle-hit" x="${open.x - PORT_WIDTH / 2 - 3}" y="${open.y - 5}" width="${PORT_WIDTH + 6}" height="14"/>
           <rect class="anim-handle-port" x="${open.x - PORT_WIDTH / 2 + 0.5}" y="${open.y - PORT_HEIGHT + 0.5}" width="${PORT_WIDTH - 1}" height="${PORT_HEIGHT + 3}"/>
         </g>`;
@@ -453,19 +459,19 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     const selected = selection(), locked = !editable();
     const disabled = locked ? 'disabled' : '';
     let markup = '';
-    const nameOf = id => text(nodeById(d, id)?.name ?? '');
+    const nameOf = id => text(nodeLabel(nodeById(d, id)));
     const stateButton = (id, focus) => `<button class="anim-name" data-select-node="${id}" data-focus="${focus}" title="Select this state">${nameOf(id)}</button>`;
     if (selected?.kind === 'node') {
       const node = nodeById(d, selected.id), loops = loopsOf(d, node.id);
       const others = [...d.nodes].sort((a, b) => a.id - b.id);
       markup += `<section class="anim-details-selection" aria-label="Selected state">
-        <label class="anim-detail-name">Name<input data-node-name data-focus="name" value="${text(node.name)}" maxlength="64" autocomplete="off" spellcheck="false" ${disabled}></label>
+        <label class="anim-detail-name">Name<input data-node-name data-focus="name" value="${text(node.name)}" placeholder="none" maxlength="64" autocomplete="off" spellcheck="false" ${disabled}></label>
         <p class="anim-detail-id">id <code>${node.id}</code><button class="anim-icon-button" data-copy-id data-focus="copy" aria-label="Copy id ${node.id}" title="Copy the id for use as state: ${node.id} in code">${icon('copy')}</button></p>
         <h3>Loops</h3>
         ${loops.length ? `<ul class="anim-detail-loops">${loops.map(edge => `<li><button data-select-edge="${edge.id}" data-focus="loop-${edge.id}">${plural(edge.frames.length, 'frame')}${edge.cancelable ? ', cancelable' : ''}</button></li>`).join('')}</ul>`
           : '<p class="anim-detail-note">No loop. Resting here shows nothing.</p>'}
         <div class="anim-detail-new-edge">
-          <label>New edge to<select data-edge-target data-focus="target" ${disabled}>${others.map(other => `<option value="${other.id}" ${other.id === node.id ? 'selected' : ''}>${text(other.id === node.id ? other.name + ' (loop)' : other.name)}</option>`).join('')}</select></label>
+          <label>New edge to<select data-edge-target data-focus="target" ${disabled}>${others.map(other => `<option value="${other.id}" ${other.id === node.id ? 'selected' : ''}>${text(other.id === node.id ? nodeLabel(other) + ' (loop)' : nodeLabel(other))}</option>`).join('')}</select></label>
           <button class="anim-icon-button" data-add-edge data-focus="add-edge" aria-label="Add edge" title="Add this edge" ${disabled}>${icon('plus')}</button>
         </div>
         <div class="anim-detail-actions"><button class="anim-icon-button danger" data-delete data-focus="delete" aria-label="Delete state" title="Delete this state and its edges" ${disabled}>${icon('trash')}</button></div>
@@ -492,7 +498,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     if (focused) details.querySelector(`[data-focus="${focused}"]`)?.focus({preventScroll: true});
   }
   function warningsMarkup(d) {
-    const nameOf = id => text(nodeById(d, id)?.name ?? '');
+    const nameOf = id => text(nodeLabel(nodeById(d, id)));
     const warnings = graphWarnings(d), lines = [];
     for (const {from, to} of warnings.unreachable) {
       lines.push(`No route from <span class="anim-name">${nameOf(from)}</span> to ${to.map(id => `<span class="anim-name">${nameOf(id)}</span>`).join(', ')}. Requesting ${to.length === 1 ? 'it' : 'them'} there cuts without a transition.`);
@@ -508,7 +514,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
     if (!editable() || !selected) return;
     if (selected.kind === 'node') {
       const node = nodeById(d, selected.id), count = edgesOf(d, node.id).length;
-      if (count && !ask(`Delete ${node.name} and its ${plural(count, 'edge')}?`)) return;
+      if (count && !ask(`Delete ${nodeLabel(node)} and its ${plural(count, 'edge')}?`)) return;
       if (run(doc => deleteNode(doc, node.id))) session.select(null);
     } else if (run(doc => deleteEdge(doc, selected.id))) session.select(null);
   }
@@ -521,8 +527,8 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
   function addNodeAt(point) {
     const node = run(doc => addNode(doc, {x: point.x, y: point.y}));
     if (!node) return;
+    // A state needs no name, so none is asked for; a double-click names it.
     session.select({kind: 'node', id: node.id});
-    startRename(node.id);
   }
 
   details.addEventListener('click', event => {

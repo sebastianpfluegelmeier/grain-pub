@@ -138,6 +138,10 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-edge-draft { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 2 3; pointer-events: none; }
 .anim-arrow path { fill: var(--muted); }
 .anim-arrow.active path { fill: var(--accent); }
+.anim-arrow.linked path { fill: var(--text); }
+.anim-edge.linked .anim-edge-line { stroke: var(--text); stroke-width: 1.6; }
+.anim-edge.linked .anim-edge-label { fill: var(--text); }
+.anim-edge.unlinked { opacity: 0.35; }
 .anim-graph-canvas.previewing .anim-node { cursor: pointer; }
 /* Preview: the state being headed for gets the accent outline, and the state
    the machine is at is filled, like Studio's play button while playing. */

@@ -19,7 +19,8 @@ const wholeIn = (value, min, max) => Number.isInteger(value) && value >= min && 
 
 // File names follow the node-name rule, which the host enforces for new files.
 export function validAnimationName(name) {
-  return validNodeName(name);
+  // A file name follows the rule for state names, but cannot be empty.
+  return name !== '' && validNodeName(name);
 }
 
 export function checkAnimationName(name) {
@@ -174,16 +175,15 @@ export function edgesOf(doc, id) {
 }
 
 export function checkNodeName(doc, name, exceptId = null) {
-  if (!validNodeName(name)) fail('State names use 1 to 64 letters, digits, spaces, _ or -, without a leading or trailing space');
+  if (!validNodeName(name)) fail('State names use up to 64 letters, digits, spaces, _ or -, without a leading or trailing space');
   // Names are case-sensitive in the file and in code, so `Idle` and `idle` are two states.
-  if (doc.nodes.some(node => node.name === name && node.id !== exceptId)) fail(`A state named ${name} already exists`);
+  // A state needs no name; any number of states can go without one.
+  if (name !== '' && doc.nodes.some(node => node.name === name && node.id !== exceptId)) fail(`A state named ${name} already exists`);
   return name;
 }
 
-// The first free `state`, `state 2`, ... name.
-export function defaultNodeName(doc) {
-  return uniqueName('state', doc.nodes.map(node => node.name));
-}
+// How a state is called in the editor: its name, or `#id` when it has none.
+export const nodeLabel = node => node ? node.name || '#' + node.id : '';
 
 function coordinate(value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) fail('State positions must be finite numbers');
@@ -192,7 +192,7 @@ function coordinate(value) {
 
 // Ids are assigned in creation order and never reused (2.1), so a deleted
 // state's id stays taken even when it was the last one.
-export function addNode(doc, {name = defaultNodeName(doc), x = 0, y = 0} = {}) {
+export function addNode(doc, {name = '', x = 0, y = 0} = {}) {
   if (doc.nodes.length >= MAX_NODES) fail(`An animation can have at most ${MAX_NODES} states`);
   if (doc.nextNodeId > MAX_NODE_ID) fail('This animation has used all 65536 state ids; duplicate the file to start numbering again');
   checkNodeName(doc, name);

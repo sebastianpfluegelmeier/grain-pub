@@ -3,7 +3,7 @@
 // of the edge alone, the drawings-per-second field and the onion skin
 // settings, including the ghosts that come from neighbouring edges.
 
-import {addFrame, duplicateFrame, deleteFrame, moveFrame, setFps, neighbourEdges, onionGhosts, edgeById, nodeById, isLoop, MAX_FPS} from './anim-model.js';
+import {addFrame, duplicateFrame, deleteFrame, moveFrame, setFps, neighbourEdges, onionGhosts, edgeById, nodeById, nodeLabel, isLoop, MAX_FPS} from './anim-model.js';
 import {surface, toRGBA} from './anim-paint.js';
 import {icon} from './icons.js';
 
@@ -151,7 +151,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
   // Rendering ---------------------------------------------------------------------------
 
   function edgeLabel(entry) {
-    const d = doc(), edge = edgeById(d, entry.edge), name = id => text(nodeById(d, id)?.name ?? '');
+    const d = doc(), edge = edgeById(d, entry.edge), name = id => text(nodeLabel(nodeById(d, id)));
     if (!edge) return '';
     if (isLoop(edge)) return `loop on <span class="anim-name">${name(edge.from)}</span>`;
     if (entry.shares) return `<span class="anim-name">${name(edge.from)}</span> → <span class="anim-name">${name(edge.to)}</span>, its ${entry.shares}`;
