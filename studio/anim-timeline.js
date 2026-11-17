@@ -4,12 +4,15 @@
 // settings, including the ghosts that come from neighbouring edges.
 
 import {addFrame, duplicateFrame, deleteFrame, moveFrame, reverseFrames, deleteFrames, moveFrames, copyFrames, pasteFrames, setFps, neighbourEdges, onionGhosts, edgeById, nodeById, nodeLabel, isLoop, MAX_FPS} from './anim-model.js';
-import {surface, toRGBA} from './anim-paint.js';
+import {surface, toRGBA, shrinkRGBA, checksum} from './anim-paint.js';
 import {icon} from './icons.js';
 
 // The longest side of a thumbnail's backing canvas; larger frames are
 // scaled down when the thumbnail is drawn.
 const THUMB_PIXELS = 96;
+// Up to this many bytes of frames in an edge, every render compares each
+// thumbnail with a checksum of its frame's pixels.
+const THUMB_CHECK_BYTES = 8 << 20;
 const DRAG_THRESHOLD = 4;
 // A finger or a pen on a thumbnail scrolls the strip; holding it still this
 // long picks the frame up for reordering instead.
@@ -38,11 +41,12 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
   // not play on its own; the drawings-per-second field stays editable,
   // because the preview follows it without restarting.
   let previewing = false;
-  // Thumbnails by frame id: {data, canvas}. A thumbnail is redrawn when its
-  // frame's pixel array is replaced (undo, redo, reload) or an edit lists the
-  // frame; strokes report their frame once, when they end.
+  // Thumbnails by frame id: {data, sum, canvas}. A thumbnail is redrawn when
+  // its frame's pixel array is replaced (undo, redo, reload) or an edit lists
+  // the frame; strokes report their frame once, when they end. Unless the
+  // edge is very large or playing, the pixels' checksum is compared as well,
+  // so a thumbnail cannot stay behind its frame whatever changed the pixels.
   const thumbs = new Map(), dirty = new Set();
-  const scratch = document.createElement('canvas');
 
   const doc = () => session.doc;
   const frame = () => session.frame;
@@ -315,6 +319,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
   }
   function renderStrip(edge, current) {
     const d = doc(), items = [], chosen = selected(), group = chosen.length > 1;
+    const check = !playing && edge.frames.length * (d.pixels.get(edge.frames[0])?.length ?? 0) <= THUMB_CHECK_BYTES;
     edge.frames.forEach((id, index) => {
       const item = document.createElement('div');
       item.className = 'anim-thumb';
@@ -328,7 +333,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
       const image = document.createElement('span');
       image.className = 'anim-thumb-image anim-checker';
       image.style.aspectRatio = `${d.width} / ${d.height}`;
-      image.append(thumbnail(id));
+      image.append(thumbnail(id, check));
       const number = document.createElement('span');
       number.className = 'anim-thumb-number';number.textContent = String(index + 1);
       // The grip picks the frame up at once, also with a finger, where a
@@ -343,18 +348,19 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     strip.setAttribute('aria-activedescendant', '');
     strip.querySelector('[aria-selected="true"]')?.scrollIntoView?.({block: 'nearest', inline: 'nearest'});
   }
-  function thumbnail(id) {
+  function thumbnail(id, check = false) {
     const d = doc(), data = d.pixels.get(id);
     let entry = thumbs.get(id);
     const scale = Math.min(1, THUMB_PIXELS / Math.max(d.width, d.height));
     const w = Math.max(1, Math.round(d.width * scale)), h = Math.max(1, Math.round(d.height * scale));
-    if (!entry || entry.data !== data || dirty.has(id) || entry.canvas.width !== w || entry.canvas.height !== h) {
+    const sum = check && data ? checksum(data) : null;
+    if (!entry || entry.data !== data || dirty.has(id) || (sum !== null && entry.sum !== sum) || entry.canvas.width !== w || entry.canvas.height !== h) {
       const canvas = entry?.canvas ?? document.createElement('canvas');
       canvas.width = w;canvas.height = h;
       // A thumbnail that could not be drawn stays marked, so the next render
       // tries again instead of keeping the old picture.
       const drawn = drawThumb(canvas, d, data);
-      entry = {data: drawn ? data : null, canvas};
+      entry = {data: drawn ? data : null, sum: data ? sum ?? checksum(data) : null, canvas};
       thumbs.set(id, entry);
       if (drawn) dirty.delete(id);
     }
@@ -368,20 +374,17 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
       return false;
     }
   }
+  // The pixels are scaled here and written straight into the thumbnail, with
+  // no copy from one canvas to another in between.
   function paintThumb(canvas, d, data) {
     const ctx = canvas.getContext?.('2d');
     if (!data) return true;
     if (!ctx) return false;
-    if (scratch.width !== d.width || scratch.height !== d.height) { scratch.width = d.width;scratch.height = d.height; }
-    const scratchContext = scratch.getContext?.('2d');
-    if (!scratchContext) return false;
-    const image = scratchContext.createImageData(d.width, d.height);
-    toRGBA(surface(d.format, d.width, d.height, data), image.data);
-    scratchContext.putImageData(image, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // Smoothing only when shrinking, so small frames stay crisp.
-    ctx.imageSmoothingEnabled = canvas.width < d.width;
-    ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+    const image = ctx.createImageData(canvas.width, canvas.height);
+    const rgba = toRGBA(surface(d.format, d.width, d.height, data));
+    if (canvas.width === d.width && canvas.height === d.height) image.data.set(rgba);
+    else shrinkRGBA(rgba, d.width, d.height, canvas.width, canvas.height, image.data);
+    ctx.putImageData(image, 0, 0);
     return true;
   }
 

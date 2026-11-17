@@ -200,7 +200,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   let view = {x: 0, y: 0, k: 1}, autoFit = true;
   let width = FALLBACK_SIZE.width, height = FALLBACK_SIZE.height;
   let gesture = null, hover = null, preview = null, drawPending = false, drawFallback = null, destroyed = false;
-  const DRAW_FALLBACK_MS = 200;
+  const DRAW_FALLBACK_MS = 200, SETTLE_MS = 50;
+  let settlePending = false;
   let spaceHeld = false, spaceUsed = false, penUntil = 0;
   // True while the size slider is dragged: the footprint is then shown in the
   // middle of the stage, because a finger has no hover position to show it at.
@@ -423,6 +424,16 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // Draws the stage: checkerboard, ghosts, frame, grid, selection and the
   // brush footprint under the pointer.
   function draw() {
+    paint();
+    // Safari on iOS can show the picture of the draw before: the frame goes
+    // through a buffer canvas, and a copy from that canvas may still hold
+    // its previous content. With a mouse the next pointer move repaints; a
+    // touch screen has none, so one more paint follows each draw.
+    if (destroyed || settlePending) return;
+    settlePending = true;
+    setTimeout(() => { settlePending = false;if (!destroyed) paint(); }, SETTLE_MS);
+  }
+  function paint() {
     drawPending = false;
     clearTimeout(drawFallback);
     if (destroyed) return;

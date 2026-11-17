@@ -916,6 +916,38 @@ export function toRGBA(s, out = new Uint8ClampedArray(s.width * s.height * 4)) {
   return out;
 }
 
+// RGBA pixels scaled down to `dw` x `dh` by averaging the source pixels each
+// target pixel covers. Colours are weighted by alpha, so transparent pixels
+// do not darken an edge. Done here and not with drawImage, so a thumbnail
+// depends on nothing but the frame's pixels.
+export function shrinkRGBA(rgba, sw, sh, dw, dh, out = new Uint8ClampedArray(dw * dh * 4)) {
+  for (let y = 0; y < dh; y++) {
+    const y0 = Math.floor(y * sh / dh), y1 = Math.max(y0 + 1, Math.floor((y + 1) * sh / dh));
+    for (let x = 0; x < dw; x++) {
+      const x0 = Math.floor(x * sw / dw), x1 = Math.max(x0 + 1, Math.floor((x + 1) * sw / dw));
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let sy = y0; sy < y1; sy++) {
+        for (let sx = x0, i = (sy * sw + x0) * 4; sx < x1; sx++, i += 4) {
+          const alpha = rgba[i + 3];
+          r += rgba[i] * alpha;g += rgba[i + 1] * alpha;b += rgba[i + 2] * alpha;a += alpha;
+        }
+      }
+      const o = (y * dw + x) * 4;
+      if (a > 0) { out[o] = r / a;out[o + 1] = g / a;out[o + 2] = b / a; } else out[o] = out[o + 1] = out[o + 2] = 0;
+      out[o + 3] = a / ((x1 - x0) * (y1 - y0));
+    }
+  }
+  return out;
+}
+
+// A 32-bit checksum of a frame's bytes (FNV-1a), to tell whether pixels
+// changed without keeping a copy.
+export function checksum(data) {
+  let hash = 2166136261;
+  for (let index = 0; index < data.length; index++) hash = Math.imul(hash ^ data[index], 16777619);
+  return hash >>> 0;
+}
+
 // Lays a tinted ghost of the frame over `out` (RGBA, source-over), for onion
 // skins. Each pixel takes the tint with the pixel's alpha times `strength`. A
 // Field has no alpha, so its value is used: 0 leaves no ghost.
