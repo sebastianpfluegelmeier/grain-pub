@@ -322,11 +322,16 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-thumb { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; border: 1px solid transparent; cursor: pointer; touch-action: pan-x; }
 .anim-thumb:hover { border-color: var(--line); }
 .anim-thumb[aria-selected="true"] { border-color: var(--accent); }
+.anim-thumb.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .anim-thumb.dragging { opacity: 0.5; }
 .anim-thumb.drop-before { box-shadow: -4px 0 0 -1px var(--accent); }
 .anim-thumb.drop-after { box-shadow: 4px 0 0 -1px var(--accent); }
 .anim-thumb-image { display: block; height: 48px; max-width: 96px; min-width: 16px; }
 .anim-thumb-image canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; object-fit: contain; }
+/* A row of dots across the top of a thumbnail; touch-action none lets a finger drag it without scrolling the strip. */
+.anim-thumb-grip { align-self: stretch; height: 9px; cursor: grab; touch-action: none; opacity: 0.55;
+  background: radial-gradient(circle, var(--muted) 1px, transparent 1.6px) center / 5px 5px repeat-x; }
+.anim-thumb-grip:hover, .anim-thumb.dragging .anim-thumb-grip { opacity: 1; }
 .anim-thumb-number { color: var(--muted); font: 10px var(--mono); }
 .anim-timeline-empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
 .anim-timeline-empty[hidden] { display: none; }
@@ -426,6 +431,7 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   /* Frame thumbnails. */
   .anim-thumb { min-width: 48px; padding: 4px; }
   .anim-thumb-image { min-width: 36px; }
+  .anim-thumb-grip { height: 18px; background-size: 6px 6px; }
 
   /* Graph: larger targets around the open outlet and along edges. The
      strokes are in screen pixels, so they do not grow with the zoom. */

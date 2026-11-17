@@ -430,6 +430,61 @@ export function moveFrame(doc, edgeId, from, to) {
   return to;
 }
 
+// Group edits. `indices` are positions in the edge, in any order.
+function checkPositions(edge, indices) {
+  const sorted = [...new Set(indices)].sort((a, b) => a - b);
+  if (!sorted.length) fail('No frames are selected');
+  for (const index of sorted) checkPosition(edge, index);
+  return sorted;
+}
+// Removes the frames at `indices`. An edge keeps at least one frame.
+export function deleteFrames(doc, edgeId, indices) {
+  const edge = needEdge(doc, edgeId), sorted = checkPositions(edge, indices);
+  if (sorted.length >= edge.frames.length) fail('An edge needs at least one frame');
+  const removed = new Set(sorted);
+  edge.frames.splice(0, edge.frames.length, ...edge.frames.filter((id, index) => !removed.has(index)));
+  return sorted.length;
+}
+// Takes the frames at `indices` out, keeps their order and puts them back
+// together so the first of them lands at position `to` of the result.
+// Returns the position used.
+export function moveFrames(doc, edgeId, indices, to) {
+  const edge = needEdge(doc, edgeId), sorted = checkPositions(edge, indices);
+  const taken = new Set(sorted), moved = sorted.map(index => edge.frames[index]);
+  const rest = edge.frames.filter((id, index) => !taken.has(index));
+  const at = Math.max(0, Math.min(rest.length, Math.round(to)));
+  rest.splice(at, 0, ...moved);
+  edge.frames.splice(0, edge.frames.length, ...rest);
+  return at;
+}
+// The frames at `indices` as a clip that pasteFrames takes: copies of the
+// pixels with the format and size they belong to.
+export function copyFrames(doc, edgeId, indices) {
+  const edge = needEdge(doc, edgeId), sorted = checkPositions(edge, indices);
+  return {format: doc.format, width: doc.width, height: doc.height,
+    frames: sorted.map(index => (doc.pixels.get(edge.frames[index]) ?? blankFrame(doc)).slice())};
+}
+// Inserts copies of a clip's frames at `index`. Returns the new frame ids.
+export function pasteFrames(doc, edgeId, index, clip) {
+  const edge = needEdge(doc, edgeId);
+  checkPosition(edge, index, edge.frames.length);
+  if (!clip?.frames?.length) fail('No frames have been copied');
+  if (clip.format !== doc.format || clip.width !== doc.width || clip.height !== doc.height) {
+    fail(`The copied frames are ${clip.width} × ${clip.height} ${clip.format}, this animation is ${doc.width} × ${doc.height} ${doc.format}`);
+  }
+  if (edge.frames.length + clip.frames.length > MAX_EDGE_FRAMES) fail(`An edge can have at most ${MAX_EDGE_FRAMES} frames`);
+  const ids = [];
+  for (const pixels of clip.frames) {
+    checkRoomForFrame(doc, edge);
+    const id = newFrameId(doc);
+    doc.pixels.set(id, pixels.slice());
+    // In the edge at once, so the next room check counts it.
+    edge.frames.splice(index + ids.length, 0, id);
+    ids.push(id);
+  }
+  return ids;
+}
+
 // Reverses the order of the edge's frames and leaves its direction alone, so
 // the edge plays its drawings back to front. Compare reverseEdge, which also
 // turns the arrow around and so keeps what is shown.
