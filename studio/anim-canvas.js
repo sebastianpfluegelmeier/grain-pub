@@ -199,7 +199,8 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // The canvas transform: frame pixel (px, py) is drawn at (px * k + x, py * k + y) CSS pixels.
   let view = {x: 0, y: 0, k: 1}, autoFit = true;
   let width = FALLBACK_SIZE.width, height = FALLBACK_SIZE.height;
-  let gesture = null, hover = null, preview = null, drawPending = false, destroyed = false;
+  let gesture = null, hover = null, preview = null, drawPending = false, drawFallback = null, destroyed = false;
+  const DRAW_FALLBACK_MS = 200;
   let spaceHeld = false, spaceUsed = false, penUntil = 0;
   // True while the size slider is dragged: the footprint is then shown in the
   // middle of the stage, because a finger has no hover position to show it at.
@@ -397,7 +398,11 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   function requestDraw() {
     if (drawPending) return;
     drawPending = true;
-    (globalThis.requestAnimationFrame ?? (callback => setTimeout(callback, 16)))(() => draw());
+    (globalThis.requestAnimationFrame ?? (callback => setTimeout(callback, 16)))(() => { if (drawPending) draw(); });
+    // A browser can hold animation frames back (a hidden page, a web app
+    // resumed from the background). Without this timer the request would stay
+    // pending and the canvas would keep its old picture.
+    drawFallback = setTimeout(() => { if (drawPending) draw(); }, DRAW_FALLBACK_MS);
   }
   let checker = {key: '', pattern: null};
   function checkerPattern(ctx, light, dark) {
@@ -419,6 +424,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
   // brush footprint under the pointer.
   function draw() {
     drawPending = false;
+    clearTimeout(drawFallback);
     if (destroyed) return;
     const d = doc(), id = frameId();
     renderChrome();
@@ -1370,6 +1376,7 @@ export function createAnimationCanvas({parent, session, onInteract = () => {}, o
     draw,
     destroy() {
       destroyed = true;
+      clearTimeout(drawFallback);
       observer?.disconnect();themeObserver?.disconnect();
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);

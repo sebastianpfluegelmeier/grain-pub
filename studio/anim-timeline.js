@@ -351,19 +351,30 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     if (!entry || entry.data !== data || dirty.has(id) || entry.canvas.width !== w || entry.canvas.height !== h) {
       const canvas = entry?.canvas ?? document.createElement('canvas');
       canvas.width = w;canvas.height = h;
-      drawThumb(canvas, d, data);
-      entry = {data, canvas};
+      // A thumbnail that could not be drawn stays marked, so the next render
+      // tries again instead of keeping the old picture.
+      const drawn = drawThumb(canvas, d, data);
+      entry = {data: drawn ? data : null, canvas};
       thumbs.set(id, entry);
-      dirty.delete(id);
+      if (drawn) dirty.delete(id);
     }
     return entry.canvas;
   }
+  // Returns false when the browser gave no drawing context or drawing failed.
   function drawThumb(canvas, d, data) {
+    try {
+      return paintThumb(canvas, d, data);
+    } catch {
+      return false;
+    }
+  }
+  function paintThumb(canvas, d, data) {
     const ctx = canvas.getContext?.('2d');
-    if (!ctx || !data) return;
+    if (!data) return true;
+    if (!ctx) return false;
     if (scratch.width !== d.width || scratch.height !== d.height) { scratch.width = d.width;scratch.height = d.height; }
     const scratchContext = scratch.getContext?.('2d');
-    if (!scratchContext) return;
+    if (!scratchContext) return false;
     const image = scratchContext.createImageData(d.width, d.height);
     toRGBA(surface(d.format, d.width, d.height, data), image.data);
     scratchContext.putImageData(image, 0, 0);
@@ -371,6 +382,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     // Smoothing only when shrinking, so small frames stay crisp.
     ctx.imageSmoothingEnabled = canvas.width < d.width;
     ctx.drawImage(scratch, 0, 0, canvas.width, canvas.height);
+    return true;
   }
 
   // Events ---------------------------------------------------------------------------------
