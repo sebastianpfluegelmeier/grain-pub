@@ -430,6 +430,15 @@ export function moveFrame(doc, edgeId, from, to) {
   return to;
 }
 
+// Reverses the order of the edge's frames and leaves its direction alone, so
+// the edge plays its drawings back to front. Compare reverseEdge, which also
+// turns the arrow around and so keeps what is shown.
+export function reverseFrames(doc, edgeId) {
+  const edge = needEdge(doc, edgeId);
+  edge.frames.reverse();
+  return edge;
+}
+
 // Tween (6.6) ----------------------------------------------------------------
 
 // The frames a tween from the frame at `index` would fill: the blank frames

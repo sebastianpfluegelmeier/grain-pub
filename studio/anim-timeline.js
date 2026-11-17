@@ -3,7 +3,7 @@
 // of the edge alone, the drawings-per-second field and the onion skin
 // settings, including the ghosts that come from neighbouring edges.
 
-import {addFrame, duplicateFrame, deleteFrame, moveFrame, setFps, neighbourEdges, onionGhosts, edgeById, nodeById, nodeLabel, isLoop, MAX_FPS} from './anim-model.js';
+import {addFrame, duplicateFrame, deleteFrame, moveFrame, reverseFrames, setFps, neighbourEdges, onionGhosts, edgeById, nodeById, nodeLabel, isLoop, MAX_FPS} from './anim-model.js';
 import {surface, toRGBA} from './anim-paint.js';
 import {icon} from './icons.js';
 
@@ -142,6 +142,13 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     stop();
     edit(d => moveFrame(d, f.edge, from, to), {edge: f.edge, frameIndex: to});
   }
+  function reverse() {
+    const f = frame();
+    if (!f || !editable() || f.count < 2) return;
+    stop();
+    // The selected drawing stays selected at its new place.
+    edit(d => reverseFrames(d, f.edge), {edge: f.edge, frameIndex: f.count - 1 - f.index});
+  }
   function select(index) {
     const edge = activeEdge();
     if (!edge) return;
@@ -197,6 +204,9 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
         <span class="anim-timeline-actions">
           <button class="anim-icon-button" data-add-frame data-focus="add" aria-label="New frame" title="New frame after this one (N)" ${disabled}>${icon('plus')}</button>
           <button class="anim-icon-button" data-duplicate-frame data-focus="duplicate" aria-label="Duplicate frame" title="Duplicate this frame" ${disabled}>${icon('copy')}</button>
+          <button class="anim-icon-button" data-move-frame="-1" data-focus="earlier" aria-label="Move frame earlier" title="Move this frame one place earlier (Alt+Left in the strip)" ${f.index > 0 && editable() ? '' : 'disabled'}>${icon('frame-earlier')}</button>
+          <button class="anim-icon-button" data-move-frame="1" data-focus="later" aria-label="Move frame later" title="Move this frame one place later (Alt+Right in the strip)" ${f.index < count - 1 && editable() ? '' : 'disabled'}>${icon('frame-later')}</button>
+          <button class="anim-icon-button" data-reverse-frames data-focus="reverse-frames" aria-label="Reverse frame order" title="Reverse the order of this edge's frames" ${count > 1 && editable() ? '' : 'disabled'}>${icon('reverse-frames')}</button>
           <button class="anim-icon-button danger" data-delete-frame data-focus="delete" aria-label="Delete frame" title="${count > 1 ? 'Delete this frame' : 'An edge keeps at least one frame'}" ${count > 1 && editable() ? '' : 'disabled'}>${icon('trash')}</button>
         </span>
         ${fps}
@@ -291,6 +301,8 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     else if (button.matches('[data-add-frame]')) addAfter();
     else if (button.matches('[data-duplicate-frame]')) duplicate();
     else if (button.matches('[data-delete-frame]')) remove();
+    else if (button.matches('[data-move-frame]')) { const index = frame().index;move(index, index + Number(button.dataset.moveFrame)); }
+    else if (button.matches('[data-reverse-frames]')) reverse();
     else if (button.matches('[data-onion]')) setOnion({on: !onion.on});
   }
   bar.addEventListener('change', event => {
