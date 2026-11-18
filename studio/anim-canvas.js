@@ -108,14 +108,18 @@ export function snapEdges(size, step, centre) {
   return [...edges].sort((a, b) => a - b);
 }
 const nearest = (values, position) => values.reduce((best, value) => Math.abs(value - position) < Math.abs(best - position) ? value : best);
-// The end of a line snaps to the pixel right of (below) the nearest target,
-// or to the last pixel at the far side. On an odd size the centre target is
-// the middle pixel. Returns that pixel and where the marker goes.
+// The end of a line snaps to the nearest target. Of the two pixels at that
+// target it takes the one on the pointer's side, so a line can end left of
+// (above) a grid line as well as right of (below) it. On an odd size the
+// centre target is the middle pixel. Returns that pixel and where the marker
+// goes.
 export function snapPixel(position, size, step, centre) {
-  let best = {pixel: size - 1, mark: size};
-  const consider = (pixel, mark) => { if (Math.abs(mark - position) < Math.abs(best.mark - position)) best = {pixel, mark}; };
-  for (let edge = 0; edge < size; edge += step) consider(edge, edge);
-  if (centre) consider(Math.floor(size / 2), size / 2);
+  let best = null;
+  const consider = (pixel, mark) => { if (!best || Math.abs(mark - position) < Math.abs(best.mark - position)) best = {pixel, mark}; };
+  const beside = edge => clamp(position >= edge ? edge : edge - 1, 0, size - 1);
+  for (let edge = 0; edge < size; edge += step) consider(beside(edge), edge);
+  consider(size - 1, size);
+  if (centre) consider(size % 2 ? (size - 1) / 2 : beside(size / 2), size / 2);
   return best;
 }
 // One axis of a snapped rectangle that starts on the edge `corner`: it ends
