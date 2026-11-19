@@ -3,21 +3,32 @@
 // canvas, graph and frame timeline are separate components mounted into the
 // regions created here; they read the document through `session` and change
 // it only through `session.edit`, which records undo and schedules the save.
+//
+// A vector animation (docs/vector-animation-design.md) shows the vector
+// canvas, its shapes panel and the keyframe timeline in place of the pixel
+// canvas and the frame timeline. They are mounted when the first vector
+// animation opens; from then on every component sees every event and shows
+// nothing for the other kind of animation, while keys and the preview go only
+// to the components on show.
 
 import {decodeAnimation, encodeAnimation, MAX_SIDE} from './anim-format.js';
 import {newAnimation, createHistory, recordEdit, undo, redo, groupByFolder, uniqueName,
-  checkAnimationName, nodeById, edgeById, resizeAnimation, ANCHORS, FORMATS, MAX_FPS, EXTENSION} from './anim-model.js';
+  checkAnimationName, nodeById, edgeById, resizeAnimation, isVectorDocument, ANCHORS, FORMATS, VECTOR, MAX_FPS, EXTENSION} from './anim-model.js';
 import {createAnimationGraph} from './anim-graph.js';
 import {createAnimationCanvas} from './anim-canvas.js';
 import {createAnimationTimeline} from './anim-timeline.js';
 import {createAnimationPreview} from './anim-preview.js';
+import {createVectorCanvas} from './anim-vector-canvas.js';
+import {createVectorPanel} from './anim-vector-panel.js';
+import {createVectorTimeline} from './anim-vector-timeline.js';
 import {icon} from './icons.js';
 
 // Matches source editing (6.8).
 export const AUTOSAVE_DELAY = 750;
 // Browsers refuse keepalive request bodies above 64 KiB in total.
 const KEEPALIVE_LIMIT = 60 * 1024;
-const FORMAT_LABELS = {image: 'Image · colour with alpha', matte: 'Matte · grey with alpha', field: 'Field · one value per pixel'};
+const FORMAT_LABELS = {image: 'Image · colour with alpha', matte: 'Matte · grey with alpha', field: 'Field · one value per pixel',
+  vector: 'Vector · shapes with keyframes'};
 const text = value => String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const keyOf = item => JSON.stringify([item.folder, item.path]);
 const query = values => new URLSearchParams(values).toString();
@@ -41,6 +52,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     <section class="anim-canvas-area" aria-label="Drawing">
       <header class="anim-document" data-document></header>
       <div id="anim-canvas" class="anim-region"></div>
+      <div id="anim-vector-canvas" class="anim-region" hidden></div>
     </section>
     <div class="divider anim-divider" data-resize="graph" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize drawing and graph"></div>
     <section class="anim-graph-area" aria-label="Graph">
@@ -48,17 +60,19 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       <div id="anim-details" class="anim-details"></div>
     </section>
     <section id="anim-timeline" class="anim-region anim-timeline" aria-label="Frame timeline"></section>
+    <section id="anim-vector-timeline" class="anim-region anim-timeline" aria-label="Keyframe timeline" hidden></section>
     <dialog class="anim-dialog" data-new-dialog>
       <form method="dialog" data-new-form>
         <h2>New animation</h2>
         <label>Name<input name="name" required maxlength="64" autocomplete="off"></label>
         <label data-folder-field>Folder<select name="folder"></select></label>
-        <label>Pixel format<select name="format">${FORMATS.map(format => `<option value="${format}">${FORMAT_LABELS[format]}</option>`).join('')}</select></label>
+        <label>Format<select name="format">${[...FORMATS, VECTOR].map(format => `<option value="${format}">${FORMAT_LABELS[format]}</option>`).join('')}</select></label>
         <div class="field-grid">
           <label>Width · px<input name="width" type="number" min="1" max="${MAX_SIDE}" step="1" value="64" required></label>
           <label>Height · px<input name="height" type="number" min="1" max="${MAX_SIDE}" step="1" value="64" required></label>
-          <label>Drawings / s<input name="fps" type="number" min="1" max="${MAX_FPS}" step="1" value="12" required></label>
+          <label data-fps-field>Drawings / s<input name="fps" type="number" min="1" max="${MAX_FPS}" step="1" value="12" required></label>
         </div>
+        <p class="anim-dialog-note" data-vector-note hidden>Shapes are placed on a canvas of this size. A vector animation has no drawings per second: the program that plays it draws it as often as it renders.</p>
         <p class="field-error" role="alert" data-new-error></p>
         <div class="dialog-actions"><button type="button" value="cancel" data-cancel>Cancel</button><button class="primary" value="create">Create</button></div>
       </form>
@@ -66,7 +80,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     <dialog class="anim-dialog" data-resize-dialog>
       <form method="dialog" data-resize-form>
         <h2>Resize canvas</h2>
-        <p class="anim-dialog-note">Pads or crops every frame. The drawings stay at the anchor.</p>
+        <p class="anim-dialog-note" data-resize-note>Pads or crops every frame. The drawings stay at the anchor.</p>
         <div class="field-grid">
           <label>Width · px<input name="width" type="number" min="1" max="${MAX_SIDE}" step="1" required></label>
           <label>Height · px<input name="height" type="number" min="1" max="${MAX_SIDE}" step="1" required></label>
@@ -139,7 +153,8 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   stepperObserver?.observe(parent, {childList: true, subtree: true});
   addSteppers();
 
-  const regions = {list: $('.anim-list'), canvas: $('#anim-canvas'), graph: $('#anim-graph'), details: $('#anim-details'), timeline: $('#anim-timeline')};
+  const regions = {list: $('.anim-list'), canvas: $('#anim-canvas'), graph: $('#anim-graph'), details: $('#anim-details'), timeline: $('#anim-timeline'),
+    vectorCanvas: $('#anim-vector-canvas'), vectorTimeline: $('#anim-vector-timeline')};
 
   let items = [], folders = [], selectedKey = null, listVersion = 0, openVersion = 0, visible = false;
   // Hidden panels (collapsible only). The list starts hidden: it is needed
@@ -156,9 +171,19 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   // The edge shown in the canvas and the timeline, and the position of the
   // selected frame in its play order. Selecting an edge makes it active;
   // selecting a state keeps the active edge, so drawing is not interrupted.
-  let activeEdge = null, frameIndex = 0;
+  // On a vector edge the playhead (seconds) and the selected shape (its index
+  // in the drawing order, or null) take the selected frame's place.
+  let activeEdge = null, frameIndex = 0, playhead = 0, shapeIndex = null;
+  // The preview values of the parameters of a vector animation, by name: the
+  // ones whose slider was moved. Editor state, never saved; a parameter
+  // without an entry shows its default.
+  const parameterValues = new Map();
   let dirty = false, editVersion = 0, saveTimer = null, savePromise = null, saveAgain = false, saveError = null, conflict = null;
   const listeners = new Set();
+  const activeVectorEdge = () => {
+    const edge = activeEdge === null || !open || !isVectorDocument(open.doc) ? null : edgeById(open.doc, activeEdge);
+    return edge && Array.isArray(edge.shapes) ? edge : null;
+  };
 
   // The document interface for the canvas, graph and timeline components.
   const session = {
@@ -169,8 +194,10 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     // autosave. See recordEdit for `options`. Returns the edit's result.
     //
     // Beyond recordEdit's options, `edge` names the edge the edit worked on
-    // (edges holding one of `frames` count too), and `frameIndex` selects a
-    // frame of the active edge once the edit is recorded.
+    // (edges holding one of `frames` count too), `frameIndex` selects a frame
+    // of the active edge once the edit is recorded, and `shape` selects a
+    // shape of the active vector edge: an index, null, or a function that
+    // gets the edit's result and returns one.
     edit(change, options = {}) {
       if (!open) throw new Error('Open an animation first.');
       if (conflict) throw new Error('Reload or overwrite the animation before editing it.');
@@ -178,6 +205,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       if (result !== undefined) {
         const frames = new Set(options.frames ?? []);
         if (Number.isInteger(options.frameIndex)) frameIndex = options.frameIndex;
+        if (options.shape !== undefined) shapeIndex = typeof options.shape === 'function' ? options.shape(result) ?? null : options.shape;
         changed('edit', {frames: [...frames]});
       }
       return result;
@@ -197,12 +225,66 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       notify('select');
     },
     // The selected frame: {edge, index, id, count} for the active edge, or
-    // null when no edge is active.
+    // null when no edge is active or the active edge is a vector edge.
     get frame() {
       const edge = activeEdge === null || !open ? null : edgeById(open.doc, activeEdge);
-      if (!edge) return null;
+      if (!edge || !Array.isArray(edge.frames)) return null;
       const index = Math.max(0, Math.min(edge.frames.length - 1, frameIndex));
       return {edge: edge.id, index, id: edge.frames[index], count: edge.frames.length};
+    },
+    // The id of the active edge: the one the canvas and the timeline show,
+    // or null.
+    get edge() {
+      return activeEdge !== null && open && edgeById(open.doc, activeEdge) ? activeEdge : null;
+    },
+    // The playhead on the active vector edge in seconds, from 0 to its
+    // length, or null without one.
+    get time() {
+      const edge = activeVectorEdge();
+      return edge ? Math.max(0, Math.min(edge.length, playhead)) : null;
+    },
+    // Moves the playhead of the active vector edge. Sends a `time` event when
+    // it changes. Never an undo step.
+    setTime(t) {
+      const edge = activeVectorEdge();
+      if (!edge || typeof t !== 'number' || !Number.isFinite(t)) return;
+      const next = Math.max(0, Math.min(edge.length, t));
+      if (next === session.time) return;
+      playhead = next;
+      notify('time');
+    },
+    // The index of the selected shape on the active vector edge, or null.
+    get shape() {
+      const edge = activeVectorEdge();
+      return edge && Number.isInteger(shapeIndex) && shapeIndex >= 0 && shapeIndex < edge.shapes.length ? shapeIndex : null;
+    },
+    // Selects a shape of the active vector edge by index, or none (null).
+    // Sends a `shape` event when it changes. Never an undo step.
+    selectShape(index) {
+      const edge = activeVectorEdge();
+      const next = edge && Number.isInteger(index) && index >= 0 && index < edge.shapes.length ? index : null;
+      if (next === session.shape) return;
+      shapeIndex = next;
+      notify('shape');
+    },
+    // The preview value of every parameter of the open vector animation, as
+    // {name: value} without a prototype, so a parameter may be called
+    // `constructor`. The canvas, its keyframe ghosts and the graph preview
+    // draw with these values.
+    get parameterValues() {
+      const values = Object.create(null);
+      for (const parameter of open?.doc.parameters ?? []) values[parameter.name] = parameterValues.get(parameter.name) ?? parameter.default;
+      return values;
+    },
+    // Sets the preview value of a parameter; null returns it to the default,
+    // which it then follows. Sends a `parameters` event when the value
+    // changes. Never an undo step.
+    setParameterValue(name, value) {
+      const parameter = open?.doc.parameters?.find(other => other.name === name);
+      if (!parameter || (value !== null && (typeof value !== 'number' || !Number.isFinite(value)))) return;
+      const before = parameterValues.get(name) ?? parameter.default;
+      if (value === null) parameterValues.delete(name);else parameterValues.set(name, value);
+      if ((value ?? parameter.default) !== before) notify('parameters');
     },
     // Selects the frame at `index` of the active edge. Sends a `frame` event
     // when it changes. Never an undo step.
@@ -214,10 +296,10 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
       frameIndex = next;
       notify('frame');
     },
-    // `listener({reason, doc, asset, selection, frame})` runs after open,
-    // close, edit, undo, redo, reload, rename, select and frame. Edit events
-    // also carry `frames`, the frame ids the edit listed. Returns a function
-    // that removes the listener.
+    // `listener({reason, doc, asset, selection, frame, time, shape})` runs
+    // after open, close, edit, undo, redo, reload, rename, select, frame,
+    // time, shape and parameters. Edit events also carry `frames`, the frame
+    // ids the edit listed. Returns a function that removes the listener.
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
   };
   // The open asset's path as code names it, as the host's import writes it:
@@ -245,18 +327,83 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   // the selected edge.
   const canvas = createAnimationCanvas({parent: regions.canvas, session, onInteract: () => timeline.stop(),
     onTogglePlay: () => preview.active ? preview.togglePause() : timeline.togglePlay(), ghosts: () => timeline.ghosts(), storage});
-  const preview = createAnimationPreview({session, graph, canvas, timeline, clock, reference: assetReference});
+  // The vector components, {canvas, panel, timeline}, once a vector
+  // animation has been opened.
+  let vector = null;
+  const vectorShown = () => Boolean(vector && open && isVectorDocument(open.doc));
+  const shownCanvas = () => vectorShown() ? vector.canvas : canvas;
+  const shownTimeline = () => vectorShown() ? vector.timeline : timeline;
+  // The preview drives whichever canvas and timeline are on show. Ending it
+  // reaches both kinds, so switching between a pixel and a vector animation
+  // while it runs leaves neither of them in preview mode. While it runs the
+  // shapes panel keeps only the parameter sliders, which it draws with.
+  const previewCanvas = {
+    setPreview(value) {
+      const shown = shownCanvas(), ending = value === null || value === undefined;
+      shown.setPreview(value);
+      if (ending) for (const other of [canvas, vector?.canvas]) if (other && other !== shown && other.previewing) other.setPreview(null);
+      vector?.panel.setPreview(!ending && shown === vector.canvas);
+    },
+  };
+  // A vector timeline also follows the preview's edge and time: `value` is
+  // then {edge, time}.
+  const previewTimeline = {
+    stop() { timeline.stop();vector?.timeline.stop(); },
+    setPreview(value) {
+      if (value) shownTimeline().setPreview(value);
+      else for (const part of [timeline, vector?.timeline]) part?.setPreview(false);
+    },
+  };
+  const preview = createAnimationPreview({session, graph, canvas: previewCanvas, timeline: previewTimeline, clock, reference: assetReference});
   // The preview comes right after the graph, so its Escape is seen before the
   // canvas would use Escape to drop its pixel selection.
   parts.push(graph, preview, timeline, canvas);
 
+  function mountVector() {
+    if (vector) return;
+    const vectorTimeline = createVectorTimeline({parent: regions.vectorTimeline, session, clock, onMessage: line => vector?.canvas.message(line),
+      onGhostsChange: () => vector?.canvas.draw()});
+    const vectorCanvas = createVectorCanvas({parent: regions.vectorCanvas, session,
+      onInteract: () => vectorTimeline.stop(),
+      onTogglePlay: () => preview.active ? preview.togglePause() : vectorTimeline.togglePlay(),
+      ghosts: () => vectorTimeline.ghosts()});
+    const panel = createVectorPanel({parent: vectorCanvas.panelHost, session, onInteract: () => vectorTimeline.stop(), onMessage: vectorCanvas.message});
+    vector = {canvas: vectorCanvas, panel, timeline: vectorTimeline};
+    // The timeline asks first, so Delete removes its selected keyframe while
+    // it has focus; the canvas next, for the point of a polygon; the panel
+    // last, for the selected shape.
+    parts.push(vectorTimeline, vectorCanvas, panel);
+  }
+  // The components that take keys: the graph, the preview and those on show.
+  function activeParts() {
+    const shown = vectorShown() ? [vector.timeline, vector.canvas, vector.panel] : [timeline, canvas];
+    const kinds = new Set([timeline, canvas, ...(vector ? [vector.timeline, vector.canvas, vector.panel] : [])]);
+    return parts.filter(part => !kinds.has(part) || shown.includes(part));
+  }
+  function applyKind() {
+    const vectorKind = vectorShown();
+    regions.canvas.hidden = vectorKind;regions.timeline.hidden = vectorKind;
+    regions.vectorCanvas.hidden = !vectorKind;regions.vectorTimeline.hidden = !vectorKind;
+  }
+
+  // The playhead, the selected shape and the parameter sliders concern the
+  // vector components only (and the preview, which draws with the sliders),
+  // and the playhead moves on every animation frame while an edge plays.
+  const VECTOR_REASONS = new Set(['time', 'shape', 'parameters']);
   function notify(reason, extra = {}) {
     // An edit, undo or reload can remove the selected item.
     if (selection && !exists(selection)) selection = null;
-    if (selection?.kind === 'edge' && selection.id !== activeEdge) { activeEdge = selection.id;frameIndex = 0; }
-    if (activeEdge !== null && !(open && edgeById(open.doc, activeEdge))) { activeEdge = null;frameIndex = 0; }
-    const event = {reason, doc: session.doc, asset: session.asset, selection: session.selection, frame: session.frame, ...extra};
-    for (const part of parts) part.update?.(event);
+    if (selection?.kind === 'edge' && selection.id !== activeEdge) { activeEdge = selection.id;frameIndex = 0;playhead = 0;shapeIndex = null; }
+    if (activeEdge !== null && !(open && edgeById(open.doc, activeEdge))) { activeEdge = null;frameIndex = 0;playhead = 0;shapeIndex = null; }
+    if (session.shape === null) shapeIndex = null;
+    // A value outlives its parameter only until the next event, so a new
+    // parameter of the same name starts at its default.
+    for (const name of [...parameterValues.keys()]) if (!open?.doc.parameters?.some(parameter => parameter.name === name)) parameterValues.delete(name);
+    const event = {reason, doc: session.doc, asset: session.asset, selection: session.selection, frame: session.frame,
+      time: session.time, shape: session.shape, ...extra};
+    const vectorParts = vector ? [vector.timeline, vector.canvas, vector.panel] : [];
+    if (reason === 'parameters') vectorParts.push(preview);
+    for (const part of parts) if (!VECTOR_REASONS.has(reason) || vectorParts.includes(part)) part.update?.(event);
     for (const listener of listeners) listener(event);
   }
   function status() {
@@ -328,8 +475,12 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   function setOpen(next, reason = next ? 'open' : 'close') {
     clearTimeout(saveTimer);saveTimer = null;
     open = next;dirty = false;conflict = null;saveError = null;editVersion++;selection = null;
-    activeEdge = null;frameIndex = 0;
+    activeEdge = null;frameIndex = 0;playhead = 0;shapeIndex = null;
+    // A reload keeps the sliders of the parameters that are still there.
+    if (reason !== 'reload') parameterValues.clear();
     if (next) selectedKey = keyOf(next);
+    if (next && isVectorDocument(next.doc)) mountVector();
+    applyKind();
     renderList();renderDocument();notify(reason);status();
   }
   async function load(item) {
@@ -462,8 +613,9 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     }
     const {doc} = open;
     const toggle = (kind, label) => `<button class="anim-icon-button anim-panel-toggle" data-toggle-panel="${kind}" aria-pressed="${!hidden[kind]}" aria-label="${label}" title="${hidden[kind] ? 'Show' : 'Hide'} the ${label.toLowerCase()}">${icon(kind === 'list' ? 'list' : 'animation-graph')}</button>`;
+    const resizeTitle = isVectorDocument(doc) ? 'Change the canvas size around an anchor; the shapes keep their place there' : 'Pad or crop every frame around an anchor';
     host.innerHTML = `${collapsible ? toggle('list', 'Animations') : ''}<div class="anim-document-title"><h2>${text(open.name)}</h2><span class="anim-document-size">${doc.width} × ${doc.height} ${doc.format}</span>
-      <button data-resize-canvas title="Pad or crop every frame around an anchor" ${conflict ? 'disabled' : ''}>Resize canvas…</button></div>
+      <button data-resize-canvas title="${resizeTitle}" ${conflict ? 'disabled' : ''}>Resize canvas…</button></div>
       ${collapsible ? toggle('graph', 'Graph') : ''}
       ${conflict ? `<div class="anim-conflict" role="alert"><p>${text(conflict)}</p><button data-reload>Reload</button><button data-overwrite>Overwrite</button></div>` : ''}`;
   }
@@ -476,7 +628,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     try { storage?.setItem(`studio-anim-${kind}-hidden`, String(hidden[kind])); } catch {}
     renderDocument();
     // The canvas and the graph measure their regions on the next frame.
-    canvas.draw();
+    shownCanvas().draw();
   }
 
   // Events -------------------------------------------------------------------
@@ -535,9 +687,19 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     const taken = items.filter(item => item.folder === select.value).map(item => item.name);
     form.elements.name.value = uniqueName('animation', taken);
     $('[data-new-error]').textContent = '';
+    applyFormatChoice();
     dialog.showModal?.();
     form.elements.name.focus();form.elements.name.select();
   }
+  // A vector animation has no drawings per second; its field is left out,
+  // and disabled so its limits do not block the form.
+  function applyFormatChoice() {
+    const vectorKind = form.elements.format.value === VECTOR;
+    $('[data-fps-field]').hidden = vectorKind;
+    form.elements.fps.disabled = vectorKind;
+    $('[data-vector-note]').hidden = !vectorKind;
+  }
+  form.elements.format.addEventListener('change', applyFormatChoice);
   $('[data-new]').onclick = guard(async () => { if (!items.length && !folders.length) await refresh();openNewDialog(); });
   $('[data-cancel]').onclick = () => dialog.close?.();
   // preventDefault must run during dispatch, or the method="dialog" form closes the dialog itself.
@@ -566,6 +728,8 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     resizeForm.elements.width.value = String(open.doc.width);
     resizeForm.elements.height.value = String(open.doc.height);
     resizeForm.elements.anchor.value = 'center';
+    $('[data-resize-note]').textContent = isVectorDocument(open.doc) ? 'Changes the size of the canvas the shapes are placed on. The shapes stay at the anchor.'
+      : 'Pads or crops every frame. The drawings stay at the anchor.';
     $('[data-resize-error]').textContent = '';
     resizeDialog.showModal?.();
     // On a touch screen focusing the field would bring up the keyboard.
@@ -588,7 +752,7 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
   // key was handled.
   function handleKey(event) {
     if (event.defaultPrevented) return false;
-    for (const part of parts) if (part.handleKey?.(event)) return true;
+    for (const part of activeParts()) if (part.handleKey?.(event)) return true;
     if (event.target?.closest?.('input,textarea,select,[contenteditable],dialog')) return false;
     const key = event.key.toLowerCase();
     if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === 'z' || key === 'y')) {
@@ -656,11 +820,14 @@ export function createAnimationView({parent, api, onError = () => {}, onSaved = 
     canvas,
     timeline,
     preview,
+    // The vector components, {canvas, panel, timeline}, or null until a
+    // vector animation has been opened.
+    get vector() { return vector && {...vector}; },
     handleKey,
     refresh,
     flush,
     async show() { visible = true;preview.setVisible(true);await refresh(); },
-    async hide() { visible = false;timeline.stop();preview.setVisible(false);await flush(); },
+    async hide() { visible = false;timeline.stop();vector?.timeline.stop();preview.setVisible(false);await flush(); },
     get visible() { return visible; },
     get items() { return items; },
     get selected() { return selectedItem(); },

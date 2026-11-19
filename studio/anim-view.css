@@ -59,6 +59,10 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-conflict button { padding: 4px 0; color: var(--text); font-size: 11px; border-bottom: 1px solid var(--muted); }
 
 .anim-region { min-width: 0; min-height: 0; position: relative; }
+/* The pixel and the vector components share their places; only those for
+   the open animation are shown. */
+#animation-view .anim-region[hidden] { display: none; }
+#anim-vector-canvas { flex: 1; }
 /* The dividers are dragged in script, also with a finger. */
 .anim-divider { touch-action: none; }
 /* Studio's scrollbar tracks are panel grey; this view has no panels. */
@@ -170,6 +174,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-detail-toggle input { appearance: none; -webkit-appearance: none; width: 12px; height: 12px; margin: 0; padding: 0; border: 1px solid var(--muted); border-radius: 0; background: transparent; cursor: pointer; }
 .anim-detail-toggle input:checked { border-color: var(--accent); padding: 2px; background: var(--accent); background-clip: content-box; }
 .anim-detail-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.anim-detail-length { flex-direction: row; align-items: center; gap: 8px; margin: 0; font-size: 12px; white-space: nowrap; }
+.anim-detail-length input { width: 60px; padding: 4px 2px; font-size: 12px; }
 .anim-details .danger { color: var(--error-text); }
 /* Graph preview (6.7): its controls take the details' place while it runs. */
 .anim-graph-toolbar [data-play-graph][aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
@@ -284,9 +290,90 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-swatch[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .anim-swatches-empty { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 11px; }
 
-/* The graph preview shows the playing frame only. */
+/* The vector canvas: the shapes panel takes the colour panel's place,
+   somewhat wider for its number fields. */
+.anim-vector-canvas { grid-template-columns: minmax(0, 1fr) minmax(200px, 244px); }
+.anim-vector-panel { display: flex; flex-direction: column; gap: 20px; min-height: 0; overflow-y: auto; padding: 8px 12px 16px; border-left: 1px dotted var(--line); font-size: 12px; }
+.anim-vector-section { display: flex; flex-direction: column; gap: 8px; }
+.anim-vector-section[hidden] { display: none; }
+.anim-vector-section h3 { margin: 0; font-size: 13px; font-weight: 500; }
+.anim-vector-section h4 { margin: 8px 0 0; font-size: 12px; font-weight: 500; }
+.anim-vector-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.anim-vector-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; margin-left: -7px; }
+.anim-shape-list { list-style: none; margin: 0; padding: 0; max-height: 216px; overflow-y: auto; border-top: 1px dotted var(--line); }
+.anim-shape-list:empty { display: none; }
+.anim-shape-list li { border-bottom: 1px dotted var(--line); }
+.anim-shape-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 4px; border: 0; background: transparent; color: var(--text); font-size: 12px; text-align: left; }
+.anim-shape-item:hover { background: transparent; }
+.anim-shape-item .ui-icon { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.anim-shape-list [aria-selected="true"] .anim-shape-item { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.anim-shape-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anim-shape-detail, .anim-shape-number { color: var(--muted); }
+.anim-shape-number { font: 10px var(--mono); }
+.anim-vector-note { margin: 0; color: var(--muted); line-height: 1.5; }
+.anim-vector-note[hidden] { display: none; }
+.anim-vector-keyframe { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-vector-keyframe .ui-icon { width: 14px; height: 14px; }
+.anim-vector-keyframe:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); background: transparent; }
+.anim-property-group { display: flex; flex-direction: column; gap: 2px; }
+.anim-property { display: flex; align-items: center; gap: 4px; min-height: 28px; }
+.anim-property-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anim-property-unit { color: var(--muted); }
+.anim-property input[type=number] { width: 52px; padding: 4px 2px; font-size: 12px; }
+.anim-property-chip { width: 22px; height: 22px; margin-right: 24px; padding: 0; border: 1px solid var(--line); }
+.anim-property-chip span { display: block; width: 100%; height: 100%; }
+/* The diamond beside a property: filled where the property has a keyframe
+   at the playhead, hollow where it changes between keyframes elsewhere, and
+   faint where it has one value for the whole edge. */
+.anim-key-toggle { position: relative; flex: none; width: 22px; height: 22px; padding: 0; border: 0; background: transparent; }
+.anim-key-toggle::before { content: ''; position: absolute; left: 7px; top: 7px; width: 7px; height: 7px; transform: rotate(45deg); border: 1px solid var(--muted); }
+.anim-key-toggle[data-state="still"]::before { opacity: 0.45; }
+.anim-key-toggle[data-state="animated"]::before { border-color: var(--text); }
+.anim-key-toggle[data-state="key"]::before { border-color: var(--accent); background: var(--accent); }
+.anim-key-toggle:hover:not(:disabled)::before { border-color: var(--text); opacity: 1; }
+.anim-key-toggle:disabled { cursor: default; }
+.anim-vector-colour { margin-top: 4px; display: flex; flex-direction: column; gap: 12px; }
+/* Studio has no global [hidden] rule; these blocks set their own display. */
+.anim-vector-section [hidden] { display: none; }
+label.anim-property { flex-direction: row; color: var(--text); }
+
+/* Parameters: a name, the slider's value and the slider, with the settings
+   opening below. Names are case-sensitive, as in Grain. */
+.anim-parameter-list, .anim-assignment-list { list-style: none; margin: 0; padding: 0; border-top: 1px dotted var(--line); }
+.anim-parameter-list:empty, .anim-assignment-list:empty { display: none; }
+.anim-parameter { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 6px; border-bottom: 1px dotted var(--line); }
+.anim-parameter-head, .anim-assignment-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.anim-parameter-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); text-transform: none; }
+.anim-parameter-value { color: var(--text); font: 11px var(--mono); }
+.anim-parameter-reset { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; }
+.anim-parameter-reset:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--muted); background: transparent; }
+/* Kept in the row, so the row does not jump when the slider leaves its default. */
+.anim-parameter-reset:disabled { visibility: hidden; }
+#animation-view :is(.anim-parameter-head, .anim-assignment-head, .anim-parameter-actions) .anim-icon-button { margin-right: -7px; }
+.anim-parameter-slider { width: 100%; margin: 0; }
+.anim-parameter-settings { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
+.anim-parameter-rename { width: 100px; padding: 4px 2px; font: 12px var(--mono); text-transform: none; }
+.anim-parameter-rename[aria-invalid="true"] { border-bottom-color: var(--error-text); }
+.anim-parameter-error { margin: 0; color: var(--error-text); font: 10px/1.5 var(--mono); text-transform: none; overflow-wrap: anywhere; }
+.anim-parameter-error:empty { display: none; }
+.anim-parameter-actions { display: flex; justify-content: flex-end; }
+.anim-parameter-ref { color: var(--text); font-family: var(--mono); text-transform: none; }
+/* The selected shape's assignments: "Width + factor × height" over its factor. */
+.anim-assignments { display: flex; flex-direction: column; gap: 8px; }
+.anim-assignment { display: flex; flex-direction: column; padding: 2px 0 4px; border-bottom: 1px dotted var(--line); }
+.anim-assignment-text { flex: 1; min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
+.anim-assignment-sum { color: var(--muted); }
+.anim-assignment-add { display: flex; flex-direction: column; gap: 2px; }
+.anim-assignment-add select { width: 128px; max-width: 62%; padding: 4px 20px 4px 2px; font-size: 12px; }
+.anim-assignment-add [data-assign-parameter] { text-transform: none; }
+.anim-assignment-add .anim-vector-keyframe { align-self: flex-start; }
+
+/* The graph preview shows the playing frame only, and for a vector
+   animation with parameters their sliders beside it. */
 .anim-canvas.previewing { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
-.anim-canvas.previewing :is(.anim-tools, .anim-colour-panel, .anim-settings) { display: none; }
+.anim-canvas.previewing :is(.anim-tools, .anim-colour-panel, .anim-settings), .anim-canvas.previewing .anim-vector-panel:not(:has(.anim-parameter)) { display: none; }
+.anim-vector-canvas.previewing:has(.anim-parameter) { grid-template-columns: minmax(0, 1fr) minmax(200px, 244px); }
+.anim-vector-panel.previewing :is([data-shapes], [data-properties]) { display: none; }
 
 /* A narrow drawing area keeps the stage wide and lays the colour controls
    out in columns below it. */
@@ -294,6 +381,7 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-canvas { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; }
   .anim-colour-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); align-items: start; gap: 8px 16px; max-height: 184px; border-left: 0; border-top: 1px dotted var(--line); }
   .anim-swatches-section { grid-column: 1 / -1; }
+  .anim-vector-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); align-items: start; gap: 12px 20px; max-height: 220px; border-left: 0; border-top: 1px dotted var(--line); }
 }
 
 /* Frame timeline (6.5). */
@@ -337,6 +425,69 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-thumb-number { color: var(--muted); font: 10px var(--mono); }
 .anim-timeline-empty { margin: 8px 0; color: var(--muted); font-size: 12px; }
 .anim-timeline-empty[hidden] { display: none; }
+
+/* Keyframe timeline (vector animations): a label column and a lane per row,
+   the ruler on top. Every lane has its own playhead line; all of them follow
+   --anim-playhead, the playhead's share of the edge. */
+.anim-key-scroll { --anim-key-label: 176px; max-height: min(24vh, 208px); overflow-x: hidden; overflow-y: auto; }
+.anim-key-scroll[hidden] { display: none; }
+.anim-key-scroll:focus { outline: none; }
+.anim-key-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.anim-key-row { display: grid; grid-template-columns: var(--anim-key-label) minmax(0, 1fr); min-height: 26px; border-bottom: 1px dotted var(--line); }
+.anim-key-ruler { position: sticky; top: 0; z-index: 2; min-height: 22px; background: var(--bg); }
+.anim-key-label { display: flex; align-items: center; gap: 2px; min-width: 0; padding-right: 8px; overflow: hidden; }
+.anim-key-property .anim-key-label { padding-left: 28px; color: var(--muted); font-size: 11px; }
+.anim-key-property-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anim-key-shape.chosen { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.anim-key-expand { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; padding: 5px; border: 0; color: var(--muted); background: transparent; }
+.anim-key-expand:hover { color: var(--text); background: transparent; }
+.anim-key-expand .ui-icon { width: 14px; height: 14px; }
+.anim-key-expand[aria-expanded="true"] .ui-icon { transform: rotate(90deg); }
+.anim-key-name { flex: 1; min-width: 0; padding: 4px 0; border: 0; color: var(--text); background: transparent; font-size: 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.anim-key-name:hover { background: transparent; }
+.anim-key-track { position: relative; min-width: 0; }
+/* Inset, so the markers at the start and the end of the edge stay whole. */
+.anim-key-lane { position: absolute; top: 0; bottom: 0; left: 10px; right: 10px; touch-action: pan-y; cursor: pointer; }
+.anim-key-playhead { position: absolute; top: 0; bottom: 0; left: calc(var(--anim-playhead, 0) * 100%); width: 1px; margin-left: -0.5px; background: var(--accent); pointer-events: none; }
+.anim-key-mark { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); pointer-events: none; }
+.anim-key-mark span { position: absolute; left: 3px; top: 4px; color: var(--muted); font: 10px var(--mono); white-space: nowrap; }
+.anim-key-mark.end span { left: auto; right: 3px; }
+.anim-key { position: absolute; top: 50%; z-index: 1; width: 20px; height: 20px; margin: -10px 0 0 -10px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; }
+.anim-key::before { content: ''; position: absolute; left: 5px; top: 5px; width: 8px; height: 8px; transform: rotate(45deg); background: var(--muted); box-shadow: 0 0 0 1px var(--bg); }
+.anim-key:hover { background: transparent; }
+.anim-key:hover::before { background: var(--text); }
+.anim-key.selected::before { background: var(--accent); }
+.anim-key.dragging { cursor: grabbing; }
+
+/* The speed curve of the selected keyframe stands beside the rows; on a
+   portrait or narrow screen it goes below them (see the end of the file). */
+.anim-vector-timeline { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.anim-vector-timeline > :is(.anim-timeline-bar, .anim-timeline-empty) { grid-column: 1 / -1; }
+.anim-vector-timeline > .anim-key-scroll { grid-column: 1; grid-row: 2; }
+.anim-key-curve { grid-column: 2; grid-row: 2; display: flex; align-items: flex-start; gap: 16px; margin-left: 12px; padding: 8px 0 8px 16px; border-left: 1px dotted var(--line); }
+.anim-key-curve[hidden] { display: none; }
+/* The square from (0, 0) to (1, 1), with half its height above and below for overshoot. */
+.anim-curve-graph { flex: none; display: block; width: 100px; height: auto; aspect-ratio: 124 / 224; overflow: visible; touch-action: none; user-select: none; -webkit-user-select: none; }
+.anim-curve-graph * { vector-effect: non-scaling-stroke; }
+.anim-curve-square { fill: none; stroke: var(--line); stroke-width: 1; }
+.anim-curve-diagonal { fill: none; stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+.anim-curve-arm { fill: none; stroke: var(--muted); stroke-width: 1; }
+.anim-curve-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.anim-curve-end { fill: var(--muted); }
+.anim-curve-handle { fill: var(--bg); stroke: var(--text); stroke-width: 1.5; cursor: grab; }
+.anim-curve-handle.active { fill: var(--accent); stroke: var(--accent); cursor: grabbing; }
+.anim-curve.disabled .anim-curve-graph { opacity: 0.4; }
+.anim-curve-side { display: flex; flex-direction: column; gap: 4px; width: 176px; }
+.anim-curve-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.anim-curve-head h4 { margin: 0; font-size: 12px; font-weight: 500; }
+#animation-view .anim-curve-head .anim-icon-button { margin-right: -7px; }
+.anim-curve-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.anim-curve-presets button { padding: 4px 0; border: 0; border-bottom: 1px solid transparent; color: var(--muted); background: transparent; font-size: 11px; text-align: left; white-space: normal; }
+.anim-curve-presets button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.anim-curve-presets button[aria-pressed="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.anim-curve-values { margin: 0; color: var(--text); font: 11px var(--mono); }
+.anim-curve-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.anim-curve-note:empty { display: none; }
 
 .anim-dialog .field-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .anim-dialog .field-grid label { margin: 0; }
@@ -443,4 +594,51 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
   .anim-anchor-grid { grid-template-columns: repeat(3, 40px); }
   .anim-anchor-grid label { width: 40px; height: 40px; }
   .anim-anchor-grid input:checked + span { padding: 12px; }
+
+  /* Vector canvas, shapes panel and keyframe timeline. */
+  .anim-vector-canvas { grid-template-columns: minmax(0, 1fr) minmax(232px, 272px); }
+  .anim-vector-panel, .anim-shape-item, .anim-key-name { font-size: 14px; }
+  .anim-shape-item { min-height: 44px; }
+  .anim-vector-section h3 { font-size: 15px; }
+  .anim-vector-section h4 { font-size: 13px; }
+  .anim-vector-keyframe, .anim-detail-length { min-height: 44px; font-size: 13px; }
+  .anim-property { min-height: 44px; }
+  .anim-property input[type=number] { width: 52px; }
+  .anim-key-toggle { width: 40px; height: 40px; }
+  .anim-key-toggle::before { left: 15px; top: 15px; width: 9px; height: 9px; }
+  .anim-property-chip { width: 32px; height: 32px; margin-right: 36px; }
+  .anim-key-scroll { --anim-key-label: 200px; }
+  .anim-key-row { min-height: 40px; }
+  .anim-key-ruler { min-height: 28px; }
+  .anim-key-property .anim-key-label { padding-left: 44px; font-size: 13px; }
+  .anim-key-expand { width: 40px; height: 40px; padding: 12px; }
+  .anim-key-expand .ui-icon { width: 16px; height: 16px; }
+  .anim-key { width: 36px; height: 36px; margin: -18px 0 0 -18px; }
+  .anim-key::before { left: 13px; top: 13px; width: 10px; height: 10px; }
+  .anim-key-mark span { font-size: 12px; }
+
+  /* Parameters, assignments and the speed curve. */
+  .anim-vector-canvas.previewing:has(.anim-parameter) { grid-template-columns: minmax(0, 1fr) minmax(232px, 272px); }
+  .anim-parameter-head, .anim-assignment-head { min-height: 44px; }
+  .anim-parameter-name { font-size: 14px; }
+  .anim-parameter-value { font-size: 13px; }
+  .anim-parameter-reset, .anim-curve-presets button { min-height: 44px; font-size: 13px; }
+  .anim-parameter-rename { width: 124px; }
+  .anim-parameter-error, .anim-curve-values, .anim-curve-note { font-size: 12px; }
+  .anim-assignment-add select { width: 148px; }
+  .anim-curve-graph { width: 116px; }
+  .anim-curve-side { width: 200px; }
+  .anim-curve-head h4 { font-size: 13px; }
+}
+
+/* Portrait and narrow screens: the speed curve below the keyframe rows, so
+   the rows keep their width. */
+@media (orientation: portrait), (max-width: 900px) {
+  .anim-vector-timeline { grid-template-columns: minmax(0, 1fr); }
+  .anim-key-curve { grid-column: 1; grid-row: 3; margin: 0; padding: 8px 0; border-left: 0; border-top: 1px dotted var(--line); }
+}
+/* After the touch sizes, which give the shapes panel a column of its own:
+   a narrow drawing area keeps it below the stage, also during the preview. */
+@container (max-width: 480px) {
+  .anim-vector-canvas, .anim-vector-canvas.previewing:has(.anim-parameter) { grid-template-columns: minmax(0, 1fr); }
 }

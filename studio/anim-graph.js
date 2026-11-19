@@ -7,7 +7,8 @@
 
 import {icon} from './icons.js';
 import {nodeLabel, tidyPositions, addNode, renameNode, moveNode, deleteNode, addEdge, reverseEdge, setBidirectional, setCancelable,
-  duplicateEdge, deleteEdge, graphWarnings, nodeById, edgeById, loopsOf, edgesOf, isLoop} from './anim-model.js';
+  duplicateEdge, deleteEdge, graphWarnings, nodeById, edgeById, loopsOf, edgesOf, isLoop, setEdgeLength} from './anim-model.js';
+import {MIN_EDGE_LENGTH, MAX_EDGE_LENGTH} from './anim-vector.js';
 
 // A state is a box. An edge attaches to the side that faces the other state
 // and ends in an arrowhead; no ports are drawn. All sizes are in graph units.
@@ -38,6 +39,11 @@ const PEN_PALM_REJECTION_MS = 800;
 const text = value => String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+// A vector edge lasts a number of seconds instead of holding frames.
+const isVectorEdge = edge => !Array.isArray(edge.frames);
+const seconds = value => String(Math.round(value * 1000) / 1000);
+// How long an edge is: its frame count, or its length in seconds.
+const spanLabel = edge => isVectorEdge(edge) ? `${seconds(edge.length)} s` : plural(edge.frames.length, 'frame');
 let instances = 0;
 
 // `onPlayGraph()` runs when the Play graph toggle is pressed; the preview
@@ -402,10 +408,11 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       // towards, so its direction shows.
       const endMarker = arrow(isSelected('edge', edge.id) || (playing && !reversed));
       const startMarker = arrow(isSelected('edge', edge.id) || reversed);
-      const frames = edge.frames.length;
+      // The label is the frame count, or the length in seconds on a vector edge.
+      const frames = isVectorEdge(edge) ? seconds(edge.length) + 's' : String(edge.frames.length);
       const description = loop ? `Loop on ${name(edge.from)}` : `Edge from ${name(edge.from)} to ${name(edge.to)}`;
-      const flags = [plural(frames, 'frame'), !loop && edge.bidirectional && 'bidirectional', edge.cancelable && 'cancelable'].filter(Boolean).join(', ');
-      const labelWidth = String(frames).length * 6.2 + 8;
+      const flags = [spanLabel(edge), !loop && edge.bidirectional && 'bidirectional', edge.cancelable && 'cancelable'].filter(Boolean).join(', ');
+      const labelWidth = frames.length * 6.2 + 8;
       markup += `<g class="${classes}" data-edge="${edge.id}" role="button" aria-label="${text(description + ', ' + flags)}">
         <title>${text(description + ', ' + flags)}</title>
         <path class="anim-edge-hit" d="${path}"/>
@@ -472,7 +479,7 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         <label class="anim-detail-name">Name<input data-node-name data-focus="name" value="${text(node.name)}" placeholder="none" maxlength="64" autocomplete="off" spellcheck="false" ${disabled}></label>
         <p class="anim-detail-id">id <code>${node.id}</code><button class="anim-icon-button" data-copy-id data-focus="copy" aria-label="Copy id ${node.id}" title="Copy the id for use as state: ${node.id} in code">${icon('copy')}</button></p>
         <h3>Loops</h3>
-        ${loops.length ? `<ul class="anim-detail-loops">${loops.map(edge => `<li><button data-select-edge="${edge.id}" data-focus="loop-${edge.id}">${plural(edge.frames.length, 'frame')}${edge.cancelable ? ', cancelable' : ''}</button></li>`).join('')}</ul>`
+        ${loops.length ? `<ul class="anim-detail-loops">${loops.map(edge => `<li><button data-select-edge="${edge.id}" data-focus="loop-${edge.id}">${spanLabel(edge)}${edge.cancelable ? ', cancelable' : ''}</button></li>`).join('')}</ul>`
           : '<p class="anim-detail-note">No loop. Resting here shows nothing.</p>'}
         <div class="anim-detail-new-edge">
           <label>New edge to<select data-edge-target data-focus="target" ${disabled}>${others.map(other => `<option value="${other.id}" ${other.id === node.id ? 'selected' : ''}>${text(other.id === node.id ? nodeLabel(other) + ' (loop)' : nodeLabel(other))}</option>`).join('')}</select></label>
@@ -481,16 +488,21 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
         <div class="anim-detail-actions"><button class="anim-icon-button danger" data-delete data-focus="delete" aria-label="Delete state" title="Delete this state and its edges" ${disabled}>${icon('trash')}</button></div>
       </section>`;
     } else if (selected?.kind === 'edge') {
-      const edge = edgeById(d, selected.id), loop = isLoop(edge);
+      const edge = edgeById(d, selected.id), loop = isLoop(edge), vectorEdge = isVectorEdge(edge);
+      // A vector edge shows its length as a field in seconds; a pixel edge its frame count.
+      const span = vectorEdge
+        ? `<label class="anim-detail-length" title="How long the edge plays at rate 1. Shortening it drops the keyframes after its new end.">Length · s<input type="number" data-edge-length data-focus="length" min="${MIN_EDGE_LENGTH}" max="${MAX_EDGE_LENGTH}" step="0.05" value="${seconds(edge.length)}" ${disabled}></label>`
+        : `<p class="anim-detail-note" data-frame-count>${plural(edge.frames.length, 'frame')}</p>`;
+      const content = vectorEdge ? 'shapes' : 'frames';
       // The heading names both ends; each name selects its state.
       markup += `<section class="anim-details-selection" aria-label="Selected edge">
         <h3>${loop ? `Loop on ${stateButton(edge.from, 'from')}` : `${stateButton(edge.from, 'from')} ${edge.bidirectional ? '⇄' : '→'} ${stateButton(edge.to, 'to')}`}</h3>
-        <p class="anim-detail-note" data-frame-count>${plural(edge.frames.length, 'frame')}</p>
+        ${span}
         ${loop ? '' : `<label class="anim-detail-toggle"><input type="checkbox" data-bidirectional data-focus="bidirectional" ${edge.bidirectional ? 'checked' : ''} ${disabled}>Bidirectional<span>also plays backwards, from end to start</span></label>`}
         <label class="anim-detail-toggle"><input type="checkbox" data-cancelable data-focus="cancelable" ${edge.cancelable ? 'checked' : ''} ${disabled}>Cancelable<span>a new request cuts it short</span></label>
         <div class="anim-detail-actions">
-          ${loop ? '' : `<button class="anim-icon-button" data-reverse data-focus="reverse" aria-label="Reverse" title="Reverse: swap start and end, and reverse the frame order" ${disabled}>${icon('swap')}</button>`}
-          <button class="anim-icon-button" data-duplicate data-focus="duplicate" aria-label="Duplicate" title="Duplicate: add a parallel edge with copies of these frames" ${disabled}>${icon('copy')}</button>
+          ${loop ? '' : `<button class="anim-icon-button" data-reverse data-focus="reverse" aria-label="Reverse" title="Reverse: swap start and end, and reverse the ${vectorEdge ? 'keyframes' : 'frame order'}" ${disabled}>${icon('swap')}</button>`}
+          <button class="anim-icon-button" data-duplicate data-focus="duplicate" aria-label="Duplicate" title="Duplicate: add a parallel edge with copies of these ${content}" ${disabled}>${icon('copy')}</button>
           <button class="anim-icon-button danger" data-delete data-focus="delete" aria-label="Delete edge" title="Delete this edge" ${disabled}>${icon('trash')}</button>
         </div>
       </section>`;
@@ -562,6 +574,10 @@ export function createAnimationGraph({parent, details, session, confirm: ask = m
       if (run(doc => setBidirectional(doc, selected.id, input.checked)) === undefined) input.checked = !input.checked;
     } else if (input.matches('[data-cancelable]')) {
       if (run(doc => setCancelable(doc, selected.id, input.checked)) === undefined) input.checked = !input.checked;
+    } else if (input.matches('[data-edge-length]')) {
+      const edge = edgeById(doc(), selected.id), value = Number(input.value);
+      // An empty or refused value goes back to the length in force.
+      if (input.value === '' || value === edge?.length || run(doc => setEdgeLength(doc, selected.id, value)) === undefined) input.value = seconds(edgeById(doc(), selected.id)?.length ?? 0);
     }
   });
   details.addEventListener('keydown', event => {

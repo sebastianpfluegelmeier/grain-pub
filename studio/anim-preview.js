@@ -5,7 +5,7 @@
 // program. The rules all live in anim-machine.js; this file only feeds it
 // inputs and time and shows the result in the graph and the canvas.
 
-import {buildGraph, createMachineState, tick, structureHash, distance, MAX_RATE} from './anim-machine.js';
+import {buildGraph, createMachineState, tick, structureHash, distance, currentTime, isVector, MAX_RATE} from './anim-machine.js';
 import {nodeById, nodeLabel} from './anim-model.js';
 import {icon} from './icons.js';
 
@@ -48,12 +48,14 @@ export function createPlayer({seed = PREVIEW_SEED} = {}) {
     // Back to "not placed", as a rewind does in the runtime.
     restart() { state = createMachineState(seed); },
     // Advances one rendered frame of `dt` seconds and returns the frame id to
-    // show, or null for the empty output.
+    // show, or null for the empty output and on vector edges.
     step(dt) {
       const result = tick(graph, state, inputs, dt);
       state = result.state;
       return result.frame;
     },
+    // Seconds on the playing vector edge in its own direction, or null.
+    get time() { return currentTime(graph, state); },
   };
 }
 
@@ -120,7 +122,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   let requested = null;
   const placement = {...PLACEMENT_DEFAULTS};
   let player = createPlayer({seed});
-  let shown = {frame: undefined, highlight: '', where: '', heading: ''};
+  let shown = {frame: undefined, vector: '', highlight: '', where: '', heading: ''};
 
   const doc = () => session.doc;
   const pageHidden = () => globalThis.document?.visibilityState === 'hidden';
@@ -188,7 +190,7 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     Object.assign(player.inputs, inputs);
     player.setGraph(d);
     request(initialRequest(d), false);
-    shown = {frame: undefined, highlight: '', where: '', heading: ''};
+    shown = {frame: undefined, vector: '', highlight: '', where: '', heading: ''};
     message('');
     graph.setPreview({onRequest: id => request(id), panel});
     stepNow();
@@ -240,13 +242,16 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   function show(frame) {
     const d = doc();
     if (!active || !d) return;
-    // A frame the document no longer holds cannot be drawn; it shows as empty.
-    const value = frame !== null && d.pixels.has(frame) ? frame : null;
-    if (value !== shown.frame) {
-      shown.frame = value;
-      canvas.setPreview({frame: value});
-    }
     const position = machinePosition(player.graph, player.state);
+    if (isVector(player.graph)) showVector(position);
+    else {
+      // A frame the document no longer holds cannot be drawn; it shows as empty.
+      const value = frame !== null && d.pixels.has(frame) ? frame : null;
+      if (value !== shown.frame) {
+        shown.frame = value;
+        canvas.setPreview({frame: value});
+      }
+    }
     const highlight = {node: position.node, edge: position.edge, requested: position.requested, reversed: position.reversed};
     const key = JSON.stringify(highlight);
     if (key !== shown.highlight) {
@@ -254,6 +259,17 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
       graph.setHighlight(highlight);
     }
     renderStatus();
+  }
+  // A vector animation has no frames: the canvas draws the playing edge at
+  // the machine's time with the parameter sliders' values, and the keyframe
+  // timeline shows the same edge and time. A resting machine shows nothing.
+  function showVector(position) {
+    const edge = position.edge, time = edge === null ? null : player.time, parameters = session.parameterValues ?? {};
+    const key = JSON.stringify([edge, time, parameters]);
+    if (key === shown.vector) return;
+    shown.vector = key;
+    canvas.setPreview({edge, time, parameters});
+    timeline.setPreview({edge, time});
   }
   // Plain sentences for where the machine is, what it plays and where it is
   // heading. Names are wrapped so they keep their case.
@@ -272,7 +288,8 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
       where = `Resting at ${name(position.node)}. ${hasLoop ? 'Loop is off' : 'It has no loop'}, so the output is empty.`;
     } else {
       const edge = g.edges[position.edge], [from, to] = g.edgeEnds[position.edge];
-      const drawing = `drawing ${position.step + 1} of ${edge.frames.length}`;
+      const drawing = isVector(g) ? `${currentTime(g, state).toFixed(2)} s of ${edge.length} s`
+        : `drawing ${position.step + 1} of ${edge.frames.length}`;
       arrival = position.reversed ? from : to;
       if (from === to) where = `Playing the loop on ${name(from)}, ${drawing}.`;
       else where = `Playing the edge from ${name(from)} to ${name(to)}${position.reversed ? ' backwards' : ''}, ${drawing}.`;
@@ -313,6 +330,8 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     $('[data-preview-urgency-value]').textContent = inputs.urgency.toFixed(2);
     const rate = $('[data-preview-rate]');
     if (rate !== focused) rate.value = literal(inputs.rate);
+    rate.closest('label').title = isVector(player.graph) ? 'Multiplies the playback speed; 0 holds the shapes where they are'
+      : 'Multiplies the drawings per second; 0 holds the current drawing';
     for (const key of ['u', 'v']) {
       const slider = $(`[data-preview-place="${key}"]`);
       if (slider !== focused) slider.value = String(placement[key]);
@@ -336,6 +355,10 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
     const state = (requested !== null && nodeById(d, requested)) || (machineRequest !== null ? player.graph.nodes[machineRequest] : null);
     if (!state) return null;
     const inputs = player.inputs, args = [JSON.stringify(path), `state: ${state.name ? JSON.stringify(state.name) : state.id}`];
+    // The parameters of a vector animation are named arguments of the call;
+    // one at its default is left out, as the runtime then uses the default.
+    const values = session.parameterValues ?? {};
+    for (const parameter of d.parameters ?? []) if (values[parameter.name] !== undefined && values[parameter.name] !== parameter.default) args.push(`${parameter.name}: ${literal(values[parameter.name])}`);
     if (inputs.urgency !== CALL_DEFAULTS.urgency) args.push(`urgency: ${literal(inputs.urgency)}`);
     if (inputs.rate !== CALL_DEFAULTS.rate) args.push(`rate: ${literal(inputs.rate)}`);
     if (inputs.loop !== CALL_DEFAULTS.loop) args.push(`loop: ${inputs.loop}`);
@@ -403,9 +426,11 @@ export function createAnimationPreview({session, graph, canvas, timeline, refere
   function update(event) {
     if (!active) return;
     if (['open', 'close', 'reload'].includes(event.reason) || !doc()) { stop();return; }
+    // A slider only changes what is drawn; the machine stays where it is.
+    if (event.reason === 'parameters') { if (isVector(player.graph)) show(null);renderControls();return; }
     if (!['edit', 'undo', 'redo', 'rename'].includes(event.reason)) return;
     player.setGraph(doc());
-    shown.frame = undefined;
+    shown.frame = undefined;shown.vector = '';
     stepNow();
     renderControls();
   }

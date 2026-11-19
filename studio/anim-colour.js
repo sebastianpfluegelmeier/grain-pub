@@ -5,6 +5,11 @@
 // switching between animations keeps a sensible colour for each. A second
 // colour sits next to it for the tools that run between two colours (noise,
 // gradient, value modes); the controls edit whichever of the two is selected.
+//
+// A vector animation uses the same controls for the fill and the outline of a
+// shape: its colours are solid, so it has the hue, saturation and value of an
+// Image, and the alpha control can be left out, since opacity is a property of
+// its own there.
 
 import {normalizeColour, toHex, parseHex, hsvToRgb, rgbToHsv, decodeValue, encodeValue} from './anim-paint.js';
 import {addSwatch, removeSwatch} from './anim-model.js';
@@ -12,36 +17,55 @@ import {icon} from './icons.js';
 
 const DEFAULT_COLOUR = [255, 255, 255, 255];
 const DEFAULT_SECOND = [0, 0, 0, 255];
+const DEFAULT_SLOTS = {
+  first: {label: 'First colour, the paint colour', title: 'First colour: the paint colour'},
+  second: {label: 'Second colour, for noise, gradients and value modes', title: 'Second colour: for noise, gradients and value modes'},
+};
 const css = ([r, g, b, a]) => `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
 const text = value => String(value).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const byte = value => clamp(Math.round(Number(value) || 0), 0, 255);
+// The controls a format gets: a vector animation's colours are those of an Image.
+const controlsOf = format => format === 'matte' || format === 'field' ? format : 'image';
 
-// `onChange(colour)` runs after every change of the paint colour.
-export function createColourPicker({parent, session, onChange = () => {}, onMessage = () => {}}) {
+// `onChange(colour, which)` runs after every change of a colour; `which` is
+// 'first', 'second', or 'both' after a swap. `slots` names the two colours
+// ({first, second}, each {label, title}); `alpha: false` leaves out the alpha
+// control and keeps both colours opaque.
+export function createColourPicker({parent, session, onChange = () => {}, onMessage = () => {}, slots = DEFAULT_SLOTS, alpha = true}) {
   parent.classList.add('anim-colour');
   const fresh = () => ({first: DEFAULT_COLOUR.slice(), second: DEFAULT_SECOND.slice()});
-  const colours = {image: fresh(), matte: fresh(), field: fresh()};
+  const colours = {image: fresh(), matte: fresh(), field: fresh(), vector: fresh()};
   // The colour the controls edit: 'first' (the paint colour) or 'second'.
   let slot = 'first';
   // Hue and saturation survive black and grey, which have neither.
   let hsv = rgbToHsv(...DEFAULT_COLOUR), renderedFormat = null, svDrag = null;
 
-  const format = () => session.doc?.format ?? 'image';
+  const format = () => session.doc?.format in colours ? session.doc.format : 'image';
   const current = () => colours[format()][slot];
   const colour = () => colours[format()].first.slice();
   const colour2 = () => colours[format()].second.slice();
   const $ = selector => parent.querySelector(selector);
+  const opaque = value => alpha ? value : [value[0], value[1], value[2], 255];
 
   // Sets the colour the controls edit; `which` ('first' or 'second') selects
   // the other one first.
   function set(next, which = slot, {keepHsv = false} = {}) {
     if (which !== slot) { slot = which;keepHsv = false; }
-    const value = normalizeColour(format(), next);
+    const value = opaque(normalizeColour(format(), next));
     colours[format()][slot] = value;
     if (!keepHsv) syncHsv(value);
     sync();
-    onChange(value.slice());
+    onChange(value.slice(), slot);
+  }
+  // Sets both colours without reporting a change, for colours that come from
+  // the document, such as the fill and outline of the selected shape.
+  function load({first, second}) {
+    const pair = colours[format()];
+    if (first) pair.first = opaque(normalizeColour(format(), first));
+    if (second) pair.second = opaque(normalizeColour(format(), second));
+    syncHsv(current());
+    sync(true);
   }
   function syncHsv(value) {
     const next = rgbToHsv(value[0], value[1], value[2]);
@@ -63,20 +87,21 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
     [pair.first, pair.second] = [pair.second, pair.first];
     syncHsv(current());
     sync(true);
-    onChange(colour());
+    onChange(colour(), 'both');
   }
 
   function build() {
     renderedFormat = format();
+    const kind = controlsOf(renderedFormat);
     const range = (data, label, max, title) => `<input type="range" ${data} min="0" max="${max}" step="1" aria-label="${label}" title="${title}">`;
     const number = (data, label, max, step = 1) => `<input type="number" ${data} min="0" max="${max}" step="${step}" aria-label="${label}">`;
     let controls = '';
-    if (renderedFormat === 'image') {
+    if (kind === 'image') {
       controls = `
         <div class="anim-sv" data-sv tabindex="0" role="slider" aria-label="Saturation and value" title="Saturation across, value up and down. Arrow keys adjust."><span class="anim-sv-marker"></span></div>
         <label class="anim-colour-control">Hue${range('data-hue', 'Hue', 359, 'Hue')}</label>
-        <label class="anim-colour-control">Alpha<span class="anim-colour-pair">${range('data-alpha class="anim-alpha"', 'Alpha', 255, 'Alpha, 0 is transparent')}${number('data-alpha-number', 'Alpha value', 255)}</span></label>`;
-    } else if (renderedFormat === 'matte') {
+        ${alpha ? `<label class="anim-colour-control">Alpha<span class="anim-colour-pair">${range('data-alpha class="anim-alpha"', 'Alpha', 255, 'Alpha, 0 is transparent')}${number('data-alpha-number', 'Alpha value', 255)}</span></label>` : ''}`;
+    } else if (kind === 'matte') {
       controls = `
         <label class="anim-colour-control">Grey<span class="anim-colour-pair">${range('data-grey class="anim-grey"', 'Grey', 255, 'Grey, stored as sRGB')}${number('data-grey-number', 'Grey value', 255)}</span></label>
         <label class="anim-colour-control">Alpha<span class="anim-colour-pair">${range('data-alpha class="anim-alpha"', 'Alpha', 255, 'Alpha, 0 is transparent')}${number('data-alpha-number', 'Alpha value', 255)}</span></label>`;
@@ -91,11 +116,11 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
     parent.innerHTML = `
       <div class="anim-colour-head">
         <span class="anim-colour-slots" role="group" aria-label="Colours">
-          <button class="anim-colour-current anim-checker" data-slot="first" aria-pressed="true" aria-label="First colour, the paint colour" title="First colour: the paint colour"><span data-current></span></button>
-          <button class="anim-colour-current anim-colour-second anim-checker" data-slot="second" aria-pressed="false" aria-label="Second colour, for noise, gradients and value modes" title="Second colour: for noise, gradients and value modes"><span data-current-second></span></button>
+          <button class="anim-colour-current anim-checker" data-slot="first" aria-pressed="true" aria-label="${text(slots.first.label)}" title="${text(slots.first.title)}"><span data-current></span></button>
+          <button class="anim-colour-current anim-colour-second anim-checker" data-slot="second" aria-pressed="false" aria-label="${text(slots.second.label)}" title="${text(slots.second.title)}"><span data-current-second></span></button>
         </span>
         <button class="anim-icon-button anim-colour-swap" data-swap aria-label="Swap the two colours" title="Swap the two colours">${icon('swap')}</button>
-        ${renderedFormat === 'image' ? `<label class="anim-hex">Hex<input data-hex maxlength="9" spellcheck="false" autocomplete="off" aria-label="Colour as hex, #rrggbbaa"></label>` : ''}
+        ${kind === 'image' ? `<label class="anim-hex">Hex<input data-hex maxlength="9" spellcheck="false" autocomplete="off" aria-label="Colour as hex, ${alpha ? '#rrggbbaa' : '#rrggbb'}"></label>` : ''}
       </div>
       ${controls}
       <section class="anim-swatches-section" aria-label="Swatches">
@@ -113,16 +138,17 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
     $('[data-current]').style.background = css(colours[format()].first);
     $('[data-current-second]').style.background = css(colours[format()].second);
     for (const button of parent.querySelectorAll('[data-slot]')) button.setAttribute('aria-pressed', String(button.dataset.slot === slot));
-    if (renderedFormat === 'image') {
-      put('[data-hex]', toHex(value));
+    const kind = controlsOf(renderedFormat);
+    if (kind === 'image') {
+      put('[data-hex]', alpha ? toHex(value) : toHex(value).slice(0, 7));
       put('[data-hue]', Math.round(hsv.h));
       const sv = $('[data-sv]');
       sv.style.setProperty('--anim-hue', `hsl(${Math.round(hsv.h)} 100% 50%)`);
       sv.setAttribute('aria-valuetext', `saturation ${Math.round(hsv.s * 100)}%, value ${Math.round(hsv.v * 100)}%`);
       Object.assign($('.anim-sv-marker').style, {left: hsv.s * 100 + '%', top: (1 - hsv.v) * 100 + '%'});
     }
-    if (renderedFormat === 'matte') { put('[data-grey]', value[0]);put('[data-grey-number]', value[0]); }
-    if (renderedFormat !== 'field') {
+    if (kind === 'matte') { put('[data-grey]', value[0]);put('[data-grey-number]', value[0]); }
+    if (kind !== 'field') {
       put('[data-alpha]', value[3]);put('[data-alpha-number]', value[3]);
       parent.style.setProperty('--anim-alpha-colour', css([...value.slice(0, 3), 255]));
     } else {
@@ -137,7 +163,7 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
     const label = hex => format() === 'field' ? `value ${decodeValue(parseHex(hex)?.[0] ?? 0).toFixed(3)} (byte ${parseHex(hex)?.[0] ?? 0})`
       : format() === 'matte' ? `grey ${parseHex(hex)?.[0] ?? 0}, alpha ${parseHex(hex)?.[3] ?? 0}` : hex;
     host.innerHTML = palette.map(hex => {
-      const shown = normalizeColour(format(), parseHex(hex) ?? [0, 0, 0, 0]);
+      const shown = opaque(normalizeColour(format(), parseHex(hex) ?? [0, 0, 0, 0]));
       return `<button class="anim-swatch anim-checker" role="listitem" data-swatch="${text(hex)}" aria-pressed="${toHex(shown) === now}" aria-label="Use ${text(label(hex))}" title="${text(label(hex))}"><span style="background:${css(shown)}"></span></button>`;
     }).join('') || '<p class="anim-swatches-empty">No swatches saved.</p>';
     if (focused) host.querySelector(`[data-swatch="${focused}"]`)?.focus({preventScroll: true});
@@ -226,6 +252,10 @@ export function createColourPicker({parent, session, onChange = () => {}, onMess
     // Sets a colour: `which` is 'first' or 'second' and defaults to the
     // colour the controls edit; the controls then edit that colour.
     set(next, which = slot) { set(next, which); },
+    load,
+    // The colour the controls edit: 'first' or 'second'.
+    get slot() { return slot; },
+    select,
     swap,
     update() { sync(); },
     // Rewrites the controls after an outside change, such as the eyedropper.
