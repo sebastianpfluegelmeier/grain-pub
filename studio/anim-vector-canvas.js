@@ -151,6 +151,17 @@ export function hitsShape(shape, x, y, reach = 0) {
   return insideOutline(points, x, y) || distanceToOutline(points, x, y) <= reach + shape.outlineThickness / 2;
 }
 
+// The keyframed values of a drag by `delta` per axis, for the axes that
+// moved only: an edit at a time without a keyframe adds one, so an axis
+// that did not move must not be written.
+function movedValues(delta, track, keyed) {
+  const values = {};
+  for (const axis of ['x', 'y']) {
+    if (Math.abs(delta[axis]) > 1e-9) values[track(axis)] = round(keyed(track(axis)) + delta[axis]);
+  }
+  return values;
+}
+
 // The handles of the selection box, by name, as fractions of the box.
 const HANDLES = {nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5]};
 const LEFT = new Set(['nw', 'w', 'sw']), RIGHT = new Set(['ne', 'e', 'se']), TOP = new Set(['nw', 'n', 'ne']), BOTTOM = new Set(['sw', 's', 'se']);
@@ -752,7 +763,7 @@ export function createVectorCanvas({parent, session, onInteract = () => {}, onTo
   // The values a gesture sets for the pointer at `p`.
   function valuesOf(g, p, event) {
     const keyed = g.keyed;
-    if (g.type === 'move') return {x: round(keyed('x') + p.x - g.from.x), y: round(keyed('y') + p.y - g.from.y)};
+    if (g.type === 'move') return movedValues({x: p.x - g.from.x, y: p.y - g.from.y}, name => name, keyed);
     if (g.type === 'rotate') {
       const angle = Math.atan2(p.y - g.shape.y, p.x - g.shape.x);
       // Unwrapped, so turning past half a turn keeps counting.
@@ -774,7 +785,7 @@ export function createVectorCanvas({parent, session, onInteract = () => {}, onTo
     if (g.type === 'point' || g.type === 'handle') {
       const local = toLocal(g.shape, p.x, p.y), start = toLocal(g.shape, g.from.x, g.from.y), point = g.shape.points[g.point];
       const dx = local.x - start.x, dy = local.y - start.y;
-      if (g.type === 'point') return {[pointTrack(g.point, 'x')]: round(keyed(pointTrack(g.point, 'x')) + dx), [pointTrack(g.point, 'y')]: round(keyed(pointTrack(g.point, 'y')) + dy)};
+      if (g.type === 'point') return movedValues({x: dx, y: dy}, axis => pointTrack(g.point, axis), keyed);
       const side = g.side, other = side === 'in' ? 'out' : 'in';
       const [hx, hy] = side === 'in' ? [point.inX, point.inY] : [point.outX, point.outY];
       const [ox, oy] = other === 'in' ? [point.inX, point.inY] : [point.outX, point.outY];
@@ -802,7 +813,7 @@ export function createVectorCanvas({parent, session, onInteract = () => {}, onTo
     release(g.pointerId);
     if (g.type === 'create') {
       const values = createValues(g);
-      if (edit(d => addShape(d, g.edge, g.kind, {values}), {shape: result => result.index}) !== undefined) setTool('select');
+      if (edit(d => addShape(d, g.edge, g.kind, {values, t: time()}), {shape: result => result.index}) !== undefined) setTool('select');
     } else if (g.type === 'place') {
       placePoint(g);
     } else if (g.type === 'move' && !g.moved && g.cycle?.length > 1) {
@@ -860,7 +871,7 @@ export function createVectorCanvas({parent, session, onInteract = () => {}, onTo
     const values = {x: cx, y: cy};
     placed.points.forEach((p, index) => { values[pointTrack(index, 'x')] = round(p.x - cx);values[pointTrack(index, 'y')] = round(p.y - cy); });
     onInteract();
-    const result = edit(d => addShape(d, placed.edge, 'polygon', {points: placed.points.length, values}), {shape: added => added.index});
+    const result = edit(d => addShape(d, placed.edge, 'polygon', {points: placed.points.length, values, t: time()}), {shape: added => added.index});
     if (result === undefined) return false;
     draft = null;
     setTool('select');

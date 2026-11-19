@@ -814,7 +814,7 @@ const rounded = value => Math.round(value * 1000) / 1000 || 0;
 // on the canvas, half as large as its shorter side, filled white with a
 // 1-pixel black outline. A polygon is regular, with its first point on top
 // and the others following clockwise, and straight sides.
-function newShapeTracks(doc, kind, points) {
+function newShapeTracks(doc, kind, points, t) {
   const size = Math.max(1, Math.round(Math.min(doc.width, doc.height) / 2));
   const values = {x: doc.width / 2, y: doc.height / 2, rotation: 0, outline_thickness: 1, outline_color: '#000000',
     outline_opacity: 1, fill_color: '#ffffff', fill_opacity: 1, width: size, height: size};
@@ -823,19 +823,22 @@ function newShapeTracks(doc, kind, points) {
     values[pointTrack(index, 'x')] = rounded(size / 2 * Math.cos(angle));
     values[pointTrack(index, 'y')] = rounded(size / 2 * Math.sin(angle));
   }
-  return Object.fromEntries(trackNames(kind, points).map(name => [name, [{t: 0, v: values[name] ?? 0}]]));
+  return Object.fromEntries(trackNames(kind, points).map(name => [name, [{t, v: values[name] ?? 0}]]));
 }
 
-// Adds a shape at `index` of the drawing order (default: on top). `values`
-// sets the value at 0 s of any of its properties by track name. Returns
+// Adds a shape at `index` of the drawing order (default: on top). Every
+// property gets one keyframe at `t`, the playhead when the shape is drawn,
+// so a later edit at another time animates from where the shape was drawn.
+// `values` sets the value of any of its properties by track name. Returns
 // {index, shape}.
-export function addShape(doc, edgeId, kind, {index, points = DEFAULT_POLYGON_POINTS, values = {}} = {}) {
+export function addShape(doc, edgeId, kind, {index, points = DEFAULT_POLYGON_POINTS, values = {}, t = 0} = {}) {
   const edge = needVectorEdge(doc, edgeId);
   if (!SHAPE_KINDS.includes(kind)) fail('Choose a rectangle, an oval or a polygon');
   if (edge.shapes.length >= MAX_SHAPES) fail(`An edge can have at most ${MAX_SHAPES} shapes`);
   if (kind === 'polygon' && !wholeIn(points, MIN_POINTS, MAX_POINTS)) fail(`A polygon has ${MIN_POINTS} to ${MAX_POINTS} points`);
   const at = checkShapeIndex(edge, index ?? edge.shapes.length, edge.shapes.length);
-  const shape = {kind, ...(kind === 'polygon' ? {points} : {}), tracks: newShapeTracks(doc, kind, kind === 'polygon' ? points : 0), assignments: []};
+  const time = checkTime(edge, t);
+  const shape = {kind, ...(kind === 'polygon' ? {points} : {}), tracks: newShapeTracks(doc, kind, kind === 'polygon' ? points : 0, time), assignments: []};
   for (const [name, value] of Object.entries(values)) needTrack(shape, name)[0].v = checkValue(name, value);
   edge.shapes.splice(at, 0, shape);
   return {index: at, shape};
@@ -989,18 +992,27 @@ export function setKeyframe(doc, edgeId, shapeIndex, property, t, value, {curve}
 }
 
 // An edit to a property at the playhead (section 11, Editor): the keyframe
-// at `t` changes; without one there, a property with one keyframe changes
-// that keyframe, and a property with several gets a new keyframe at `t`.
-// Returns the changed keyframe's index.
+// at `t` changes, and without one there a new keyframe is added at `t`. A
+// value the property already has at `t` adds no keyframe, so a gesture that
+// writes an unchanged property leaves its track as it is. Returns the
+// changed keyframe's index, or -1 when nothing changed.
 export function setPropertyAt(doc, edgeId, shapeIndex, property, t, value) {
   const {edge, shape} = needShape(doc, edgeId, shapeIndex);
   const track = needTrack(shape, property);
   const time = checkTime(edge, t), checked = checkValue(property, value);
   let index = keyframeAt(track, time);
-  if (index < 0 && track.length === 1) index = 0;
-  if (index < 0) index = insertKeyframe(track, time);
+  if (index < 0) {
+    if (sameValue(sampleTrack(track, time), checked)) return -1;
+    index = insertKeyframe(track, time);
+  }
   track[index].v = checked;
   return index;
+}
+
+// A sampled track value (a number, or sRGB channels) against a checked one
+// (a number, or a `#rrggbb` colour).
+function sameValue(sampled, checked) {
+  return Array.isArray(sampled) ? formatColor(sampled) === checked : sampled === checked;
 }
 
 // The Keyframe button: a keyframe at `t` on every property of the shape that
