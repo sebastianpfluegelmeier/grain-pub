@@ -323,6 +323,8 @@ main.full-height-layout > #animation-view { grid-row: 1 / -1; grid-column: 1 / -
 .anim-thumb:hover { border-color: var(--line); }
 .anim-thumb[aria-selected="true"] { border-color: var(--accent); }
 .anim-thumb.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.anim-thumb.pinned .anim-thumb-number { color: rgb(24, 150, 84); font-weight: 700; }
+.anim-thumb.pinned .anim-thumb-number::before { content: "● "; }
 .anim-thumb.dragging { opacity: 0.5; }
 .anim-thumb.drop-before { box-shadow: -4px 0 0 -1px var(--accent); }
 .anim-thumb.drop-after { box-shadow: 4px 0 0 -1px var(--accent); }

@@ -34,8 +34,12 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
 
   const onion = {on: false, count: 1};
   // The neighbouring edges picked for the onion skin, per edge: {before, after},
-  // each an edge id, or null for none. Missing means all of them.
+  // each an edge id, 'all', or null for none. Missing means automatic.
   const choices = new Map();
+  // Frames pinned for the onion skin, by id: they stay ghosted whichever
+  // frame or edge is selected. Like the other onion settings they belong to
+  // the editor and are not written into the animation.
+  const pinned = new Set();
   let playing = null, playEdge = null, drag = null;
   // While the graph preview runs, frames cannot be changed and the edge does
   // not play on its own; the drawings-per-second field stays editable,
@@ -117,22 +121,46 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     const edge = activeEdge();
     return edge ? neighbourEdges(doc(), edge.id) : {before: [], after: []};
   }
-  // The neighbours ghosted on one side, as a list: every edge at that state
-  // unless the user picked one (while it still exists) or none. All of them
-  // meet in the same pose, so together they show where the drawings disagree,
-  // and the ghosts do not change with what was edited last.
+  // The neighbours ghosted on one side, as a list. Automatically these are
+  // the loops on that state, which hold its resting pose, and every other
+  // edge there only when the state has no loop. The user can pick all of
+  // them, one (while it still exists) or none instead. Several edges meet in
+  // the same pose, so together they show where the drawings disagree, and the
+  // ghosts do not change with what was edited last.
+  const loopsIn = list => list.filter(entry => isLoop(edgeById(doc(), entry.edge)));
+  function automatic(list) {
+    const loops = loopsIn(list);
+    return loops.length ? loops : list;
+  }
   function chosen(side, list = neighbours()[side]) {
     const edge = activeEdge();
     if (!edge) return [];
     const stored = choices.get(edge.id)?.[side];
     if (stored === null) return [];
+    if (stored === 'all') return list;
     const found = stored !== undefined && list.find(entry => entry.edge === stored);
-    return found ? [found] : list;
+    return found ? [found] : automatic(list);
   }
   function ghosts() {
     const f = frame();
     if (!onion.on || !f || !activeEdge()) return [];
-    return onionGhosts(doc(), f.edge, f.index, {count: onion.count, before: chosen('before'), after: chosen('after')});
+    // A pinned frame is shown as pinned, not also as a neighbour.
+    const near = onionGhosts(doc(), f.edge, f.index, {count: onion.count, before: chosen('before'), after: chosen('after')}).filter(ghost => !pinned.has(ghost.id));
+    return [...near, ...[...pinned].filter(id => doc().pixels.has(id)).map(id => ({id, side: 'pinned', distance: 1}))];
+  }
+  // Pins the selected frames, or unpins them when all of them are pinned.
+  // Pinning switches the onion skin on, because a pin shows only with it.
+  function togglePin() {
+    const edge = activeEdge();
+    if (!edge) return;
+    const ids = selected().map(index => edge.frames[index]), all = ids.every(id => pinned.has(id));
+    for (const id of ids) if (all) pinned.delete(id);else pinned.add(id);
+    if (!all) onion.on = true;
+    render();onGhostsChange();
+  }
+  function clearPins() {
+    pinned.clear();
+    render();onGhostsChange();
   }
   function setOnion(next) {
     Object.assign(onion, next);
@@ -262,13 +290,21 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     return plain.map((label, index) => plain.indexOf(label) !== plain.lastIndexOf(label) ? `${label} (edge ${list[index].edge})` : label);
   }
   function menu(side, list) {
-    const pick = chosen(side, list), labels = optionLabels(list);
-    const title = side === 'before' ? 'The edges at the start state whose nearest frames are ghosted before the first frame' : 'The edges at the end state whose nearest frames are ghosted after the last frame';
-    const one = pick.length === 1 && list.length > 1 ? pick[0].edge : null, all = pick.length > 0 && one === null;
+    const labels = optionLabels(list), stored = choices.get(activeEdge()?.id)?.[side];
+    const title = side === 'before' ? 'The edges at the start state whose nearest frames are ghosted before the first frame. Loops: the loops on the state, or every edge there when it has none.' : 'The edges at the end state whose nearest frames are ghosted after the last frame. Loops: the loops on the state, or every edge there when it has none.';
+    // "loops" is offered only where it differs from "all" and from a single edge.
+    const loops = loopsIn(list), offerLoops = loops.length > 1 && loops.length < list.length;
+    const found = typeof stored === 'number' && list.some(entry => entry.edge === stored) ? stored : null;
+    const auto = automatic(list);
+    let value = stored === null ? 'none' : found !== null ? String(found) : stored === 'all' ? 'all' : offerLoops ? 'loops' : auto.length === list.length ? 'all' : String(auto[0]?.edge);
+    if (value === 'all' && list.length === 1) value = String(list[0].edge);
+    if (!list.length) value = 'none';
+    const option = (key, label) => `<option value="${key}" ${value === key ? 'selected' : ''}>${label}</option>`;
     return `<label class="anim-onion-choice" title="${title}">${side === 'before' ? 'Before' : 'After'}<select data-onion-${side} ${list.length ? '' : 'disabled'}>
-      <option value="none" ${pick.length ? '' : 'selected'}>none</option>
-      ${list.length > 1 ? `<option value="all" ${all ? 'selected' : ''}>all</option>` : ''}
-      ${list.map((entry, index) => `<option value="${entry.edge}" ${one === entry.edge || (all && list.length === 1) ? 'selected' : ''}>${text(labels[index])}</option>`).join('')}
+      ${option('none', 'none')}
+      ${offerLoops ? option('loops', 'loops') : ''}
+      ${list.length > 1 ? option('all', 'all') : ''}
+      ${list.map((entry, index) => option(String(entry.edge), text(labels[index]))).join('')}
     </select></label>`;
   }
   function render() {
@@ -285,6 +321,7 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     } else {
       const {before, after} = neighbours(), count = edge.frames.length;
       const chosen = selected(), group = chosen.length > 1;
+      const allPinned = chosen.every(index => pinned.has(edge.frames[index]));
       const canEarlier = editable() && chosen[0] > 0, canLater = editable() && chosen.at(-1) < count - 1;
       bar.innerHTML = `
         <h3 class="anim-timeline-title">${edgeLabel({edge: edge.id, reversed: false})}</h3>
@@ -308,6 +345,8 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
         ${fps}
         <span class="anim-onion">
           <button class="anim-icon-button" data-onion data-focus="onion" aria-pressed="${onion.on}" aria-label="Onion skin" title="Onion skin: show ghosts of neighbouring frames (O)">${icon('onion')}</button>
+          <button class="anim-icon-button" data-pin data-focus="pin" aria-pressed="${allPinned}" aria-label="${allPinned ? 'Unpin' : 'Pin'} ${group ? 'frames' : 'frame'}" title="${allPinned ? 'Unpin: stop showing the selected frames as ghosts' : 'Pin: keep the selected frames as ghosts on every frame'}">${icon('pin')}</button>
+          ${pinned.size ? `<button class="anim-icon-button" data-unpin-all data-focus="unpin-all" aria-label="Unpin all frames" title="Unpin all ${pinned.size} pinned frames">${icon('x')}</button>` : ''}
           ${onion.on ? `<label class="anim-onion-choice" title="Ghosts on each side">Ghosts<select data-onion-count>${[1, 2, 3].map(value => `<option ${value === onion.count ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
             ${menu('before', before)}${menu('after', after)}` : ''}
         </span>`;
@@ -326,7 +365,8 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
       item.setAttribute('role', 'option');
       item.setAttribute('aria-selected', String(index === current));
       if (group && chosen.includes(index)) item.classList.add('picked');
-      item.setAttribute('aria-label', `Frame ${index + 1}`);
+      if (pinned.has(id)) item.classList.add('pinned');
+      item.setAttribute('aria-label', `Frame ${index + 1}${pinned.has(id) ? ', pinned' : ''}`);
       item.dataset.index = String(index);
       if (drag?.dragging && drag.over === index && drag.over !== drag.from) item.classList.add(drag.over > drag.from ? 'drop-after' : 'drop-before');
       if (drag?.dragging && (drag.from === index || (drag.group && chosen.includes(index)))) item.classList.add('dragging');
@@ -420,13 +460,15 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     else if (button.matches('[data-paste-frames]')) paste();
     else if (button.matches('[data-reverse-frames]')) reverse();
     else if (button.matches('[data-onion]')) setOnion({on: !onion.on});
+    else if (button.matches('[data-pin]')) togglePin();
+    else if (button.matches('[data-unpin-all]')) clearPins();
   }
   bar.addEventListener('change', event => {
     const input = event.target;
     if (input.matches('[data-fps]')) {
       try { session.edit(d => setFps(d, Number(input.value))); } catch (error) { input.value = String(doc().fps);onError(error); }
     } else if (input.matches('[data-onion-count]')) setOnion({count: Number(input.value)});
-    else if (input.matches('[data-onion-before],[data-onion-after]')) choose(input.matches('[data-onion-before]') ? 'before' : 'after', input.value === 'none' ? null : input.value === 'all' ? undefined : Number(input.value));
+    else if (input.matches('[data-onion-before],[data-onion-after]')) choose(input.matches('[data-onion-before]') ? 'before' : 'after', input.value === 'none' ? null : input.value === 'loops' ? undefined : input.value === 'all' ? 'all' : Number(input.value));
   });
   // A press selects; dragging past a few pixels reorders. The listeners for
   // the drag sit on the document, so leaving the strip does not end it. A
@@ -520,6 +562,9 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
 
   function update(event) {
     if (['open', 'close', 'reload'].includes(event.reason)) { stop();thumbs.clear();dirty.clear();choices.clear(); }
+    // A reload keeps the pins whose frames still exist; another animation starts without any.
+    if (event.reason === 'open' || event.reason === 'close') pinned.clear();
+    else if (doc()) for (const id of [...pinned]) if (!doc().pixels.has(id)) pinned.delete(id);
     if (event.reason === 'edit') for (const id of event.frames ?? []) dirty.add(id);
     if (playing && activeEdge()?.id !== playEdge) stop();
     if (activeEdge()?.id !== pickedEdge) { picked.clear();pickedEdge = activeEdge()?.id ?? null; }
@@ -543,6 +588,9 @@ export function createAnimationTimeline({parent, session, onGhostsChange = () =>
     },
     get onion() { return {...onion}; },
     setOnion,
+    get pinned() { return [...pinned]; },
+    togglePin,
+    clearPins,
     // The neighbour entries for the selected edge and the ones in use.
     get neighbours() { const list = neighbours();return {...list, before: list.before, after: list.after, chosen: {before: chosen('before', list.before), after: chosen('after', list.after)}}; },
     choose,

@@ -34,7 +34,7 @@ export const PEN_PALM_REJECTION_MS = 800;
 const FIT_PADDING = 16;
 // Used while the stage is hidden or measured without layout (tests).
 const FALLBACK_SIZE = {width: 480, height: 360};
-const ONION_TINTS = {previous: [217, 45, 32], next: [39, 90, 210]};
+const ONION_TINTS = {previous: [217, 45, 32], next: [39, 90, 210], pinned: [24, 150, 84]};
 const ONION_STRENGTH = [0.45, 0.3, 0.2];
 const isMac = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '');
 const shortcut = key => (isMac ? '⌘' : 'Ctrl+') + key;
